@@ -23,6 +23,11 @@ const IC = {
   x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
   moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
   clock: '<path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/>',
+  mega: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
+  image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'
 };
 const ico = k => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${IC[k] || IC.file}</svg>`;
@@ -50,7 +55,8 @@ const S = {
   malla: { lunes: null, sede: null, filas: [] },
   turnoSede: null,
   asistencia: { filas: [] },
-  equipo: { claveNueva: null, filtro: '' }
+  equipo: { claveNueva: null, filtro: '' },
+  com: { lista: [], imgs: {}, lect: [], filtro: 'todos', q: '', borrador: [], lb: null, hl: null }
 };
 
 const PASOS = [
@@ -70,6 +76,7 @@ const area = id => S.areas.find(a => a.id === id) || { nombre: 'Sin área' };
 const turno = id => S.turnos.find(t => t.id === id);
 const persona = id => S.personas.find(p => p.id === id);
 const miTz = () => sede(P().sede_id).zona_horaria;
+const puedePublicar = () => esLider();
 const tol = () => ({ entrada: 5, almuerzo: 5, ...(S.config.tolerancias ? { entrada: S.config.tolerancias.entrada_min, almuerzo: S.config.tolerancias.almuerzo_min } : {}) });
 const claseTurno = t => !t ? 't-none' : ['M', 'T', 'S', 'D', 'V'].includes(t.codigo) ? `t-${t.codigo}` : (t.entrada ? 't-X' : 't-D');
 
@@ -185,20 +192,22 @@ function sinPerfilView() {
 /* ── Marco de la aplicación ── */
 function appView() {
   const p = P();
-  const tabs = [['inicio', 'Inicio'], ['malla', 'Malla']];
+  const tabs = [['inicio', 'Inicio'], ['malla', 'Malla'], ['comunicados', 'Comunicados']];
+  const pendCom = sinConfirmar().length;
   if (esLider()) tabs.push(['asistencia', 'Asistencia']);
   if (p.es_admin) tabs.push(['equipo', 'Equipo']);
-  const vistas = { inicio: inicioView, malla: mallaView, asistencia: asistenciaView, equipo: equipoView, clave: () => claveView(false) };
+  const vistas = { inicio: inicioView, malla: mallaView, comunicados: comunicadosView, asistencia: asistenciaView, equipo: equipoView, clave: () => claveView(false) };
   const rol = { gerente: 'Gerente', directora: 'Directora', colaborador: 'Colaborador' }[p.rol] + (p.es_admin ? ' · administración' : '');
   return `<header class="top"><div class="wrap">
       <div class="brand"><img src="assets/logo-wakanda.png" alt=""><span>Wakanda Travel</span></div>
-      <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
+      <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}${k === 'comunicados' && pendCom ? `<span class="badge" aria-label="${pendCom} sin confirmar">${pendCom}</span>` : ''}</button>`).join('')}</nav>
       <div class="menu"><button type="button" data-accion="menu" aria-expanded="${S.menu}" aria-label="Menú de ${esc(p.nombre)}"><span class="avatar">${initials(p.nombre)}</span></button>
         ${S.menu ? `<div class="menu-pop"><div class="who"><b>${esc(p.nombre)}</b>${esc(rol)} · ${esc(sede(p.sede_id).nombre)}</div>
           <button type="button" data-view="clave">Cambiar contraseña</button><button type="button" data-accion="salir">Cerrar sesión</button></div>` : ''}</div>
     </div></header>
     <main class="wrap">${(vistas[S.view] || inicioView)()}</main>
-    <footer class="foot-site"><div class="wrap"><span><b>Wakanda Travel</b> — Diseñadores de viajes, diseñadores de sueños</span><span>Intranet · RNT 101438</span></div></footer>`;
+    <footer class="foot-site"><div class="wrap"><span><b>Wakanda Travel</b> — Diseñadores de viajes, diseñadores de sueños</span><span>Intranet · RNT 101438</span></div></footer>
+    ${lightboxView()}`;
 }
 
 /* ── Inicio: pase de jornada ── */
@@ -210,6 +219,7 @@ async function cargarInicio() {
     q(sb.from('malla').select('fecha,turno_id').eq('persona_id', P().id).gte('fecha', lunes).lte('fecha', sumarDias(lunes, 5)))
   ]);
   S.hoy = { fecha: hoy, malla: mallaHoy, marcas, semana, lunes };
+  await cargarComunicados();
 }
 function evaluar(paso, realMin, t, marcas) {
   if (!t || !t.entrada) return null;
@@ -232,9 +242,10 @@ function inicioView() {
   return `<div class="hello"><div><div class="eyebrow">Intranet · ${esc(fechaLarga(S.hoy.fecha))}</div>
       <h1>${saludo}, <em>${esc(p.nombre.split(' ')[0])}</em></h1>
       <p>${esc(area(p.area_id).nombre)} · Sede ${esc(sede(p.sede_id).nombre)}. Marca tu jornada y abre tus herramientas desde aquí.</p></div></div>
+    ${avisoLectura()}
     <div class="grid-home"><div class="col">${paseView()}
       <section><div class="sec-h"><h2>Herramientas</h2><span class="hint">Se abren en una pestaña nueva</span></div>${herramientasView()}</section></div>
-      <div class="col">${semanaView()}</div></div>`;
+      <div class="col">${comunicadosMini()}${semanaView()}</div></div>`;
 }
 function paseView() {
   const p = P(), tz = miTz(), t = S.hoy.malla ? turno(S.hoy.malla.turno_id) : null;
@@ -363,6 +374,150 @@ function asistenciaView() {
     </tbody></table></div>`;
 }
 
+/* ── Comunicados ── */
+const DESTINOS = () => [['todos', null, 'Todo el equipo'], ...S.areas.map(a => ['area', a.id, a.nombre]), ...S.sedes.map(x => ['sede', x.id, `Sede ${x.nombre}`])];
+const paraTexto = c => c.destino === 'todos' ? 'Todo el equipo' : c.destino === 'area' ? area(c.destino_id).nombre : `Sede ${sede(c.destino_id).nombre}`;
+// Destinatarios: personas activas a quienes va el comunicado, sin contar a quien lo escribió.
+const destinatarios = c => S.personas.filter(x => x.activo && x.id !== c.autor_id &&
+  (c.destino === 'todos' || (c.destino === 'area' && x.area_id === c.destino_id) || (c.destino === 'sede' && x.sede_id === c.destino_id)));
+const leyo = (c, pid) => S.com.lect.some(l => l.comunicado_id === c.id && l.persona_id === pid);
+const sinConfirmar = () => (S.com.lista || []).filter(c => c.requiere_confirmacion && c.autor_id !== P().id && destinatarios(c).some(x => x.id === P().id) && !leyo(c, P().id));
+const norm = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const cuando = ts => { const d = new Date(ts); return d.toLocaleDateString('es-CO', { timeZone: miTz(), day: 'numeric', month: 'short' }) + ', ' + horaEn(miTz(), d); };
+
+async function cargarComunicados() {
+  const lista = await q(sb.from('comunicados').select('id,autor_id,titulo,cuerpo,destino,destino_id,requiere_confirmacion,fijado,creado')
+    .order('fijado', { ascending: false }).order('creado', { ascending: false }).limit(100));
+  const ids = lista.map(c => c.id);
+  let imgs = [], lect = [];
+  if (ids.length) {
+    [imgs, lect] = await Promise.all([
+      q(sb.from('comunicado_imagenes').select('id,comunicado_id,ruta,nombre,orden').in('comunicado_id', ids).order('orden')),
+      q(sb.from('comunicado_lecturas').select('comunicado_id,persona_id,leido_en').in('comunicado_id', ids))
+    ]);
+  }
+  const porCom = {};
+  if (imgs.length) {
+    const { data: firmadas } = await sb.storage.from('comunicados').createSignedUrls(imgs.map(i => i.ruta), 3600);
+    const url = Object.fromEntries((firmadas || []).map(f => [f.path, f.signedUrl]));
+    for (const i of imgs) (porCom[i.comunicado_id] = porCom[i.comunicado_id] || []).push({ ...i, url: url[i.ruta] });
+  }
+  Object.assign(S.com, { lista, imgs: porCom, lect });
+}
+function avisoLectura() {
+  const n = sinConfirmar().length; if (!n) return '';
+  return `<div class="alerta" role="status"><span class="sq">${ico('mega')}</span><div><b>Tienes ${n} ${n === 1 ? 'comunicado' : 'comunicados'} sin confirmar</b>
+    <span>Léelos y toca <b>Confirmar lectura</b>. La gerencia ve quién ya los leyó.</span></div>
+    <button type="button" class="btn sm teal" data-comf="pend">Ver ${n === 1 ? 'comunicado' : 'comunicados'}</button></div>`;
+}
+function notaView(c, compacto) {
+  const autor = persona(c.autor_id), imgs = S.com.imgs[c.id] || [], dest = destinatarios(c);
+  const conf = dest.filter(x => leyo(c, x.id)), faltan = dest.filter(x => !leyo(c, x.id));
+  const soyDest = dest.some(x => x.id === P().id), yaLei = leyo(c, P().id), esAutor = c.autor_id === P().id;
+  const veSeguimiento = c.requiere_confirmacion && (esGerencia() || esAutor || puedePublicar());
+  const pendiente = c.requiere_confirmacion && soyDest && !yaLei;
+  let pie = '';
+  if (c.requiere_confirmacion && soyDest) pie += `<div class="note-foot">${yaLei ? `<span class="chip ok">${ico('check')} Leído</span>`
+      : `<span class="chip warn">Requiere confirmación</span><button type="button" class="btn sm teal" data-leer="${c.id}">Confirmar lectura</button>`}</div>`;
+  if (veSeguimiento && !compacto) {
+    const pct = dest.length ? Math.round(conf.length / dest.length * 100) : 100;
+    pie += `<div class="note-foot"><span class="hint num">Confirmado por ${conf.length} de ${dest.length}</span><div class="bar"><span style="width:${pct}%"></span></div></div>
+      ${faltan.length ? `<div class="hint">Faltan: ${faltan.map(x => esc(x.nombre)).join(', ')}</div>` : ''}`;
+  }
+  const qtxt = compacto ? '' : S.com.q;
+  const resaltar = t => { if (!qtxt.trim()) return esc(t); const i = norm(t).indexOf(norm(qtxt.trim())); if (i < 0) return esc(t); const L = qtxt.trim().length;
+    return esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + L)) + '</mark>' + esc(t.slice(i + L)); };
+  const galeria = imgs.length ? `<div class="thumbs">${(compacto ? imgs.slice(0, 3) : imgs).map((im, i) =>
+    `<button type="button" class="thumb ${compacto ? 'sm' : ''}" data-lb="${c.id}|${i}" aria-label="Ver imagen ${esc(im.nombre)}">${im.url ? `<img src="${esc(im.url)}" alt="" loading="lazy">` : ''}</button>`).join('')}</div>` : '';
+  const borrar = !compacto && (esAutor || esGerencia()) ? `<button type="button" class="link" data-borrarcom="${c.id}" style="font-size:13px;color:var(--bad)">${ico('trash')} Eliminar</button>` : '';
+  return `<article class="card note ${c.fijado ? 'pin' : ''} ${pendiente ? 'unread' : ''} ${S.com.hl === c.id ? 'hl' : ''}" id="com-${c.id}">
+    <div class="note-meta">${c.fijado ? `<span class="chip info">${ico('pin')} Fijado</span>` : ''}<span>${esc(autor ? autor.nombre : 'Alguien del equipo')}</span><span>·</span><span>${esc(cuando(c.creado))}</span>
+      ${imgs.length ? `<span>·</span><span class="imgcount">${ico('image')} ${imgs.length}</span>` : ''}${borrar ? `<span style="margin-left:auto">${borrar}</span>` : ''}</div>
+    <h3>${resaltar(c.titulo)}</h3>${compacto ? '' : `<p style="white-space:pre-line">${resaltar(c.cuerpo)}</p><div class="hint">Para: ${esc(paraTexto(c))}</div>`}${galeria}${pie}</article>`;
+}
+function comunicadosMini() {
+  const pend = sinConfirmar(), resto = S.com.lista.filter(c => !pend.includes(c));
+  const lista = [...pend, ...resto].slice(0, 3);
+  return `<section><div class="sec-h"><h2>Comunicados</h2><button type="button" class="link" data-view="comunicados">Ver todos</button></div>
+    <div class="news">${lista.length ? lista.map(c => notaView(c, true)).join('') : '<div class="card vacio">Todavía no hay comunicados.</div>'}</div></section>`;
+}
+function listaComunicados() {
+  const pend = sinConfirmar();
+  const lista = S.com.lista.filter(c => (S.com.filtro !== 'pend' || pend.includes(c)) && (!S.com.q.trim() || norm(`${c.titulo} ${c.cuerpo}`).includes(norm(S.com.q.trim()))));
+  if (lista.length) return lista.map(c => notaView(c, false)).join('');
+  if (S.com.filtro === 'pend' && !S.com.q.trim()) return `<div class="card vacio">${ico('check')} Estás al día: no tienes comunicados por confirmar.</div>`;
+  return S.com.q.trim() ? `<div class="card vacio">No hay comunicados que digan "${esc(S.com.q)}". Prueba con otra palabra.</div>` : '<div class="card vacio">Todavía no hay comunicados.</div>';
+}
+function borradorView() {
+  return S.com.borrador.map((im, i) => `<span class="thumb sm"><img src="${esc(im.vista)}" alt="${esc(im.file.name)}"><button type="button" class="x" data-quitarimg="${i}" aria-label="Quitar ${esc(im.file.name)}">×</button></span>`).join('');
+}
+function comunicadosView() {
+  const n = sinConfirmar().length;
+  const form = puedePublicar() ? `<section><div class="sec-h"><h2>Nuevo comunicado</h2></div>
+    <form class="card compose" id="fCom" novalidate>
+      <div class="field"><label for="cTit">Título</label><input id="cTit" maxlength="140" placeholder="Ej.: Cierre de mes de facturación"></div>
+      <div class="field"><label for="cTxt">Mensaje</label><textarea id="cTxt" rows="5" placeholder="Escribe el comunicado"></textarea></div>
+      <div class="row2"><div class="field"><label for="cPara">Para</label><select id="cPara">${DESTINOS().map(([d, id, l]) => `<option value="${d}|${id ?? ''}">${esc(l)}</option>`).join('')}</select></div>
+        <div class="field" style="align-content:end;gap:10px"><label class="check"><input type="checkbox" id="cReq" checked> Pedir confirmación de lectura</label>
+          <label class="check"><input type="checkbox" id="cPin"> Fijar arriba</label></div></div>
+      <div class="field"><span style="font-size:14px;font-weight:600;color:var(--navy)">Imágenes <span class="hint">(opcional, JPG o PNG)</span></span>
+        <div class="drop"><label class="btn ghost sm" for="cImg">${ico('image')} Agregar imágenes</label><input id="cImg" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+          <span>Se guardan en una carpeta privada; solo las ve quien recibe el comunicado.</span></div>
+        <div class="thumbs" id="borrador">${borradorView()}</div></div>
+      <div><button class="btn" type="submit">${ico('mega')} Publicar</button></div></form></section>`
+    : `<section><div class="sec-h"><h2>¿Cómo funciona?</h2></div><div class="card vacio">Cuando un comunicado pide confirmación, léelo y toca <b>Confirmar lectura</b>. La gerencia ve quién ya lo leyó.</div></section>`;
+  return `<div class="hello"><div><div class="eyebrow">Intranet · comunicación interna</div><h1>¿Qué hay de <em>nuevo</em>?</h1>
+      <p>${puedePublicar() ? 'Publica para todo el equipo, un área o una sede, y mira quién ya leyó.' : 'Lo que la agencia necesita que sepas.'}</p></div></div>
+    <div class="grid-home"><div class="col"><section>
+      <div class="sec-h"><h2>Comunicados</h2><div class="seg" role="group" aria-label="Filtrar comunicados">
+        <button type="button" data-comf="todos" aria-pressed="${S.com.filtro !== 'pend'}">Todos</button><button type="button" data-comf="pend" aria-pressed="${S.com.filtro === 'pend'}">Sin confirmar (${n})</button></div></div>
+      <div class="search" style="max-width:none;margin-bottom:14px">${ico('search')}<input id="qCom" type="search" placeholder="Buscar en comunicados" aria-label="Buscar en comunicados" value="${esc(S.com.q)}" autocomplete="off"></div>
+      <div class="news" id="listaCom">${listaComunicados()}</div></section></div>
+      <div class="col">${form}</div></div>`;
+}
+function lightboxView() {
+  const lb = S.com.lb; if (!lb) return '';
+  const imgs = S.com.imgs[lb.cid] || [], im = imgs[lb.i], c = S.com.lista.find(x => x.id === lb.cid); if (!im || !c) return '';
+  return `<div class="lightbox" role="dialog" aria-modal="true" aria-label="Imagen del comunicado">
+    <div class="lb-top"><div><b>${esc(c.titulo)}</b><div style="font-size:13px;opacity:.8">${esc(im.nombre)} · ${lb.i + 1} de ${imgs.length}</div></div>
+      <button type="button" class="btn ghost sm" data-accion="lbCerrar">Cerrar</button></div>
+    <div class="lb-img"><img src="${esc(im.url)}" alt="${esc(im.nombre)}"></div>
+    <div class="lb-nav">${imgs.length > 1 ? '<button type="button" class="btn ghost sm" data-lbmover="-1">Anterior</button><button type="button" class="btn ghost sm" data-lbmover="1">Siguiente</button>' : ''}
+      <a class="btn ghost sm" href="${esc(im.url)}" target="_blank" rel="noopener">Abrir en tamaño completo</a></div></div>`;
+}
+// Reduce fotos grandes antes de subirlas (máx. 1920 px, JPG), para que carguen rápido y quepan en el límite de 10 MB.
+async function prepararImagen(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error(`"${file.name}" no es JPG, PNG ni WEBP.`);
+  let bmp; try { bmp = await createImageBitmap(file); } catch (_) { return file; }
+  const max = 1920, k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  if (k === 1 && file.size < 1.5e6) return file;
+  const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85));
+  return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+}
+const slug = t => norm(t).replace(/[^a-z0-9.]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'imagen';
+async function publicarComunicado(f) {
+  const titulo = f.querySelector('#cTit').value.trim(), cuerpo = f.querySelector('#cTxt').value.trim();
+  if (!titulo || !cuerpo) { toast('Escribe un título y un mensaje para publicar.'); return false; }
+  const [destino, did] = f.querySelector('#cPara').value.split('|');
+  const nuevo = await q(sb.from('comunicados').insert({ autor_id: P().id, titulo, cuerpo, destino, destino_id: did ? Number(did) : null,
+    requiere_confirmacion: f.querySelector('#cReq').checked, fijado: f.querySelector('#cPin').checked }).select('id').single());
+  const fallidas = [];
+  for (const [i, b] of S.com.borrador.entries()) {
+    try {
+      const archivo = await prepararImagen(b.file), ruta = `${nuevo.id}/${Date.now()}-${i}-${slug(archivo.name)}`;
+      const { error } = await sb.storage.from('comunicados').upload(ruta, archivo, { contentType: archivo.type, upsert: false });
+      if (error) throw error;
+      await q(sb.from('comunicado_imagenes').insert({ comunicado_id: nuevo.id, ruta, nombre: b.file.name, orden: i }));
+    } catch (e) { fallidas.push(b.file.name); }
+  }
+  S.com.borrador = [];
+  await cargarComunicados(); render();
+  toast(fallidas.length ? `Comunicado publicado, pero no se pudieron subir: ${fallidas.join(', ')}.` : 'Comunicado publicado. El equipo lo verá en su inicio.');
+  return true;
+}
+
 /* ── Equipo: cuentas (administración) ── */
 function claveTemporal() {
   const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = new Uint32Array(10); crypto.getRandomValues(r);
@@ -415,6 +570,7 @@ async function ir(view) {
   try {
     if (view === 'inicio') await cargarInicio();
     if (view === 'malla') await cargarMalla();
+    if (view === 'comunicados') await cargarComunicados();
     if (view === 'asistencia') await cargarAsistencia();
     if (view === 'equipo') await recargarPersonas();
   } catch (e) { toast(errorTexto(e)); }
@@ -445,6 +601,11 @@ document.addEventListener('submit', async e => {
     S.error = ''; toast('Contraseña guardada.');
     if (S.pantalla === 'clave') await cargarUsuario(data.user); else ir('inicio');
   }
+  if (f.id === 'fCom') {
+    ocupado(btn, true);
+    try { await publicarComunicado(f); } catch (err) { toast(errorTexto(err)); } finally { ocupado(btn, false); }
+    return;
+  }
   if (f.id === 'fCuenta') {
     const nombre = f.querySelector('#nNombre').value.trim(), correo = f.querySelector('#nCorreo').value.trim().toLowerCase();
     if (!nombre || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) { toast('Escribe el nombre y un correo válido.'); return; }
@@ -463,6 +624,32 @@ document.addEventListener('click', async e => {
   const a = b.dataset.accion;
   if (b.dataset.view) { ir(b.dataset.view); return; }
   if (a === 'menu') { S.menu = !S.menu; render(); return; }
+  if (b.dataset.comf) {
+    S.com.filtro = b.dataset.comf;
+    if (S.view !== 'comunicados') { await ir('comunicados'); return; }
+    document.querySelectorAll('[data-comf]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.comf === S.com.filtro)));
+    document.getElementById('listaCom').innerHTML = listaComunicados(); return;
+  }
+  if (b.dataset.leer) {
+    ocupado(b, true);
+    try { await q(sb.from('comunicado_lecturas').insert({ comunicado_id: Number(b.dataset.leer), persona_id: P().id })); await cargarComunicados(); render(); toast('Lectura confirmada.'); }
+    catch (err) { ocupado(b, false); toast(errorTexto(err)); }
+    return;
+  }
+  if (b.dataset.borrarcom) {
+    const c = S.com.lista.find(x => x.id === Number(b.dataset.borrarcom));
+    if (!confirm(`¿Eliminar el comunicado "${c.titulo}"? No se puede deshacer.`)) return;
+    try {
+      const rutas = (S.com.imgs[c.id] || []).map(i => i.ruta);
+      if (rutas.length) await sb.storage.from('comunicados').remove(rutas);
+      await q(sb.from('comunicados').delete().eq('id', c.id)); await cargarComunicados(); render(); toast('Comunicado eliminado.');
+    } catch (err) { toast(errorTexto(err)); }
+    return;
+  }
+  if (b.dataset.lb) { const [cid, i] = b.dataset.lb.split('|').map(Number); S.com.lb = { cid, i }; render(); return; }
+  if (a === 'lbCerrar') { S.com.lb = null; render(); return; }
+  if (b.dataset.lbmover) { const n = (S.com.imgs[S.com.lb.cid] || []).length; S.com.lb.i = (S.com.lb.i + Number(b.dataset.lbmover) + n) % n; render(); return; }
+  if (b.dataset.quitarimg) { const [x] = S.com.borrador.splice(Number(b.dataset.quitarimg), 1); URL.revokeObjectURL(x.vista); document.getElementById('borrador').innerHTML = borradorView(); return; }
   if (a === 'salir') { salir(); return; }
   if (a === 'cerrarClave') { ir('inicio'); return; }
   if (a === 'aceptarDatos') {
@@ -520,6 +707,13 @@ document.addEventListener('change', async e => {
       else await q(sb.from('malla').delete().eq('persona_id', pid).eq('fecha', fecha));
       await cargarMalla(); render(); toast('Turno guardado.'); return;
     }
+    if (el.id === 'cImg') {
+      for (const file of el.files) {
+        if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { toast(`"${file.name}" no es JPG, PNG ni WEBP.`); continue; }
+        S.com.borrador.push({ file, vista: URL.createObjectURL(file) });
+      }
+      el.value = ''; document.getElementById('borrador').innerHTML = borradorView(); return;
+    }
     if (el.id === 'mSede') { S.malla.sede = Number(el.value); render(); return; }
     if (el.id === 'tSede') { S.turnoSede = Number(el.value); render(); return; }
     if (el.dataset.turno) {
@@ -538,9 +732,13 @@ document.addEventListener('change', async e => {
 });
 
 document.addEventListener('input', e => {
+  if (e.target.id === 'qCom') { S.com.q = e.target.value; document.getElementById('listaCom').innerHTML = listaComunicados(); return; }
   if (e.target.id === 'eFiltro') { S.equipo.filtro = e.target.value; const pos = e.target.selectionStart; render(); const n = document.getElementById('eFiltro'); n.focus(); n.setSelectionRange(pos, pos); }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.menu) { S.menu = false; render(); } });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && (S.menu || S.com.lb)) { S.menu = false; S.com.lb = null; render(); }
+  if (S.com.lb && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { const n = (S.com.imgs[S.com.lb.cid] || []).length; S.com.lb.i = (S.com.lb.i + (e.key === 'ArrowRight' ? 1 : -1) + n) % n; render(); }
+});
 
 setInterval(() => {
   const c = document.getElementById('clock'); if (!c || !S.perfil) return;
