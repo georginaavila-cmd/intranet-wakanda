@@ -2,7 +2,7 @@
 -- Sedes, áreas, turnos de ejemplo, herramientas y configuración. Todo se puede cambiar después desde la intranet.
 
 insert into sedes (nombre, zona_horaria) values
-  ('Bogotá', 'America/Bogota'),
+  ('Colombia', 'America/Bogota'),
   ('República Dominicana', 'America/Santo_Domingo');
 
 insert into areas (nombre) values
@@ -36,4 +36,4 @@ insert into configuracion (clave, valor) values
   ('meta_puntualidad', '{"porcentaje": 95}'),
   ('validar_ip', '{"activo": false}');                          -- se activa en la etapa final, desde la oficina
 
--- 2 de octubre de 2026: la sede de Santo Domingo se llama "República Dominicana" (ya aplicado en Supabase).
+-- 2 de octubre de 2026: las sedes se llaman "Colombia" y "República Dominicana" (ya aplicado en Supabase).

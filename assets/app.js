@@ -59,6 +59,7 @@ const S = {
   turnoSede: null,
   asistencia: { filas: [] },
   equipo: { claveNueva: null, filtro: '' },
+  inf: { mes: null, sede: 0, area: 0, orden: 'minT', sel: null, datos: null },
   com: { lista: [], imgs: {}, lect: [], filtro: 'todos', q: '', borrador: [], hl: null },
   lb: null,
   sol: { lista: [], adj: {}, revisores: [], tipo: 'vacaciones', borrador: [], ausencias: [] }
@@ -103,6 +104,8 @@ const errorTexto = e => {
   return m.replace(/^.*?ERROR:\s*/, '');
 };
 async function q(promesa) { const { data, error } = await promesa; if (error) throw error; return data; }
+// Trae todas las filas de una consulta, de 1.000 en 1.000 (Supabase entrega máximo 1.000 por vez).
+async function todas(armar) { const out = []; for (let i = 0; ; i += 1000) { const d = await q(armar().range(i, i + 999)); out.push(...d); if (d.length < 1000) return out; } }
 function render() { document.getElementById('app').innerHTML = vista(); }
 function vista() {
   switch (S.pantalla) {
@@ -199,11 +202,11 @@ function appView() {
   const p = P();
   const tabs = [['inicio', 'Inicio'], ['malla', 'Malla'], ['comunicados', 'Comunicados']];
   const pendCom = sinConfirmar().length;
-  if (esLider()) tabs.push(['asistencia', 'Asistencia']);
+  if (esLider()) tabs.push(['asistencia', 'Asistencia'], ['informes', 'Informes']);
   if (moduloSol() || esGerencia()) tabs.push(['solicitudes', 'Solicitudes']);
   if (p.es_admin) tabs.push(['equipo', 'Equipo']);
   const pendSol = moduloSol() ? porRevisar().filter(x => puedeAprobar(x)).length : 0;
-  const vistas = { inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, clave: () => claveView(false) };
+  const vistas = { informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, clave: () => claveView(false) };
   const rol = { gerente: 'Gerente', directora: 'Directora', colaborador: 'Colaborador' }[p.rol] + (p.es_admin ? ' · administración' : '');
   return `<header class="top"><div class="wrap">
       <div class="brand"><img src="assets/logo-wakanda.png" alt=""><span>Wakanda Travel</span></div>
@@ -680,6 +683,142 @@ async function enviarSolicitud(f) {
   toast(fallidos.length ? `Solicitud enviada, pero no se pudieron subir: ${fallidos.join(', ')}.` : 'Solicitud enviada. Te avisaremos aquí cuando la revisen.');
 }
 
+/* ── Informes mensuales (líderes) ── */
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const mesesDisponibles = () => { const [y, m] = fechaEn(miTz()).split('-').map(Number); return Array.from({ length: 12 }, (_, i) => { const d = new Date(Date.UTC(y, m - 1 - i, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; }); };
+const nombreMes = k => { const [y, m] = k.split('-').map(Number); return `${MESES[m - 1]} ${y}`; };
+const fmtHM = v => `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+const horasTxt = m => `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+const meta = () => (S.config.meta_puntualidad && S.config.meta_puntualidad.porcentaje) || 95;
+
+async function cargarInforme() {
+  if (!S.inf.mes) { const ms = mesesDisponibles(); S.inf.mes = Number(fechaEn(miTz()).slice(8)) <= 5 ? ms[1] : ms[0]; }
+  if (!esGerencia()) S.inf.sede = P().sede_id;
+  const [y, m] = S.inf.mes.split('-').map(Number), desde = `${S.inf.mes}-01`, hasta = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  const [malla, marcas, ausR] = await Promise.all([
+    todas(() => sb.from('malla').select('persona_id,fecha,turno_id').gte('fecha', desde).lte('fecha', hasta).order('fecha')),
+    todas(() => sb.from('marcas').select('persona_id,fecha,tipo,hora').gte('fecha', desde).lte('fecha', hasta).order('fecha')),
+    sb.rpc('ausencias_aprobadas', { p_desde: desde, p_hasta: hasta })
+  ]);
+  if (!S.com.lista.length) await cargarComunicados();
+  S.inf.datos = { desde, hasta, malla, marcas, ausencias: ausR.data || [] };
+}
+function calcularInforme() {
+  const D = S.inf.datos, T = tol();
+  const gente = S.personas.filter(x => lideraSede(x.sede_id) && (!S.inf.sede || x.sede_id === S.inf.sede) && (!S.inf.area || x.area_id === S.inf.area) && D.malla.some(r => r.persona_id === x.id));
+  const ids = new Set(gente.map(x => x.id));
+  const st = Object.fromEntries(gente.map(x => [x.id, { p: x, dias: 0, tardes: 0, minT: 0, almL: 0, temp: 0, extra: 0, aus: 0, just: 0, sinConf: 0, detalle: [] }]));
+  const marcasDe = {};
+  for (const r of D.marcas) if (ids.has(r.persona_id)) { const k = r.persona_id + '|' + r.fecha; (marcasDe[k] = marcasDe[k] || {})[r.tipo] = toMin(horaEn(sede(persona(r.persona_id).sede_id).zona_horaria, new Date(r.hora))); }
+  const porDia = {};
+  for (const r of D.malla) {
+    if (!ids.has(r.persona_id)) continue;
+    const x = persona(r.persona_id), t = turno(r.turno_id), hoy = fechaEn(sede(x.sede_id).zona_horaria);
+    if (!t || !t.entrada || r.fecha >= hoy) continue;              // solo días cerrados con horario
+    const s2 = st[x.id], dia = Number(r.fecha.slice(8)); porDia[dia] = porDia[dia] || [];
+    const aus = D.ausencias.find(a => a.persona_id === x.id && a.desde <= r.fecha && r.fecha <= a.hasta);
+    if (aus) { s2.just++; s2.detalle.push({ f: r.fecha, txt: TIPOS[aus.tipo].estado, cls: 'info' }); continue; }
+    const mk = marcasDe[x.id + '|' + r.fecha] || {};
+    if (mk.entrada == null) { s2.aus++; s2.detalle.push({ f: r.fecha, txt: 'Sin marcar', cls: 'bad' }); continue; }
+    s2.dias++;
+    const tarde = mk.entrada - toMin(t.entrada);
+    if (tarde > T.entrada) { s2.tardes++; s2.minT += tarde; porDia[dia].push({ n: x.nombre, min: tarde }); s2.detalle.push({ f: r.fecha, txt: `Tarde ${tarde} min`, cls: 'warn' }); }
+    if (t.salida_almuerzo && mk.salida_almuerzo != null && mk.regreso_almuerzo != null) {
+      const dur = mk.regreso_almuerzo - mk.salida_almuerzo, perm = toMin(t.regreso_almuerzo) - toMin(t.salida_almuerzo);
+      if (dur > perm + T.almuerzo) { s2.almL++; s2.detalle.push({ f: r.fecha, txt: `Almuerzo ${dur} min`, cls: 'warn' }); }
+    }
+    if (mk.salida != null) { const d = mk.salida - toMin(t.salida); if (d < 0) { s2.temp++; s2.detalle.push({ f: r.fecha, txt: `Salió ${-d} min antes`, cls: 'warn' }); } else if (d > 30) s2.extra += d; }
+  }
+  const coms = S.com.lista.filter(c => c.requiere_confirmacion && c.creado.slice(0, 7) === S.inf.mes).map(c => {
+    const dest = destinatarios(c).filter(x => ids.has(x.id));
+    return { c, dest, conf: dest.filter(x => leyo(c, x.id)), faltan: dest.filter(x => !leyo(c, x.id)) };
+  }).filter(x => x.dest.length);
+  for (const x of coms) for (const p of x.faltan) st[p.id].sinConf++;
+  const lista = Object.values(st), tot = k => lista.reduce((a, b) => a + b[k], 0);
+  const dias = Object.keys(porDia).map(Number).sort((a, b) => a - b);
+  return { lista, tot, porDia, dias, coms };
+}
+function graficaDias(I) {
+  const W = 720, H = 220, L = 30, R = 8, Tp = 12, B = 26, iw = W - L - R, ih = H - Tp - B, ds = I.dias, n = ds.length || 1, bw = iw / n;
+  const vals = ds.map(d => I.porDia[d].length), max = Math.max(4, ...vals), paso = max <= 6 ? 1 : max <= 12 ? 2 : 5, top = Math.ceil(max / paso) * paso;
+  const yv = v => Tp + ih - (v / top) * ih;
+  let g = '<g class="grid">'; for (let v = 0; v <= top; v += paso) g += `<line x1="${L}" x2="${W - R}" y1="${yv(v)}" y2="${yv(v)}"/><text x="${L - 8}" y="${yv(v) + 4}" text-anchor="end">${v}</text>`; g += '</g>';
+  const [y, m] = S.inf.mes.split('-').map(Number);
+  const barras = ds.map((d, i) => {
+    const v = vals[i], x = L + i * bw, w = Math.max(2, bw - 2), h = ih * v / top, yy = Tp + ih - h, r = Math.min(4, h, w / 2);
+    const path = v ? `M${x + 1},${Tp + ih} V${yy + r} Q${x + 1},${yy} ${x + 1 + r},${yy} H${x + 1 + w - r} Q${x + 1 + w},${yy} ${x + 1 + w},${yy + r} V${Tp + ih} Z` : '';
+    const lbl = new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 1 || i === 0;
+    return `<g data-dia="${d}"><rect class="hit" x="${x}" y="${Tp}" width="${bw}" height="${ih}"/>${v ? `<path class="bar" d="${path}"/>` : ''}${lbl ? `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${d}</text>` : ''}</g>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Llegadas tarde por día del mes">${g}<line x1="${L}" x2="${W - R}" y1="${Tp + ih}" y2="${Tp + ih}" stroke="var(--blue-200)"/>${barras}</svg>`;
+}
+function informesView() {
+  const D = S.inf.datos; if (!D) return '<div class="cargando">Cargando el informe…</div>';
+  const I = calcularInforme(), L = I.lista, mes = nombreMes(S.inf.mes);
+  const dias = I.tot('dias'), tardes = I.tot('tardes'), punt = dias ? Math.round((1 - tardes / dias) * 1000) / 10 : 0;
+  const pc = x => x.dias ? Math.round((1 - x.tardes / x.dias) * 100) : 0, pcCls = v => v >= meta() ? 'ok' : v >= meta() - 10 ? 'warn' : 'bad';
+  const opt = (arr, v) => arr.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const filtros = `<div class="filters">
+    <div class="field"><label for="iMes">Mes</label><select id="iMes">${opt(mesesDisponibles().map(k => [k, nombreMes(k).replace(/^./, c => c.toUpperCase())]), S.inf.mes)}</select></div>
+    ${esGerencia() ? `<div class="field"><label for="iSede">Sede</label><select id="iSede">${opt([[0, 'Las dos sedes'], ...S.sedes.map(x => [x.id, x.nombre])], S.inf.sede)}</select></div>`
+      : `<div class="field"><label>Sede</label><select disabled><option>${esc(sede(P().sede_id).nombre)}</option></select></div>`}
+    <div class="field"><label for="iArea">Área</label><select id="iArea">${opt([[0, 'Todas'], ...S.areas.map(a => [a.id, a.nombre])], S.inf.area)}</select></div>
+    <span style="flex:1"></span><button class="btn ghost" type="button" data-accion="exportar" ${L.length ? '' : 'disabled'}>${ico('file')} Exportar a Excel</button></div>`;
+  const head = `<div class="hello"><div><div class="eyebrow">Intranet · informes de asistencia</div><h1>Asistencia de <em>${esc(mes)}</em></h1>
+    <p>${S.inf.sede ? `Sede ${esc(sede(S.inf.sede).nombre)}` : 'Las dos sedes'}${S.inf.area ? ` · ${esc(area(S.inf.area).nombre)}` : ''}, comparado con la malla de cada día. Solo cuentan los días ya cerrados.</p></div></div>`;
+  if (!I.dias.length && !I.coms.length) return head + filtros + `<div class="card vacio">No hay jornadas programadas en la malla para ${esc(mes)} todavía. El informe se llena a medida que las directoras publican la malla y el equipo marca.</div>`;
+  const kpi = (c, v, l, sub, i) => `<div class="card kpi"><span class="sq ${c}">${ico(i)}</span><div><b class="num">${v}</b><span>${l}</span>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+  const rk = L.filter(x => x.tardes).sort((a, b) => b.minT - a.minT || b.tardes - a.tardes).slice(0, 8), maxR = rk.length ? rk[0].minT : 1;
+  const sel = L.find(x => x.p.id === S.inf.sel);
+  const orden = L.slice().sort((a, b) => S.inf.orden === 'punt' ? pc(a) - pc(b) : b[S.inf.orden] - a[S.inf.orden]);
+  const th = (k, l) => `<th class="n sortable" data-orden="${k}" aria-sort="${S.inf.orden === k ? 'descending' : 'none'}">${l}${S.inf.orden === k ? ' ↓' : ''}</th>`;
+  const totD = I.coms.reduce((a, x) => a + x.dest.length, 0), totC = I.coms.reduce((a, x) => a + x.conf.length, 0);
+  return head + filtros + `
+    <div class="kpis six">
+      <div class="card kpi hero"><div style="display:flex;gap:14px;align-items:center"><span class="sq ${pcCls(punt)}">${ico('check')}</span><span class="lbl">Puntualidad del equipo</span></div>
+        <div><b class="num">${punt} %</b><small>${dias - tardes} de ${dias} jornadas marcadas empezaron a tiempo</small></div>
+        <div class="meter" aria-hidden="true"><div class="track2"><i style="width:${punt}%;background:var(--${pcCls(punt) === 'ok' ? 'ok' : pcCls(punt) === 'warn' ? 'teal' : 'bad'})"></i></div><div class="scale"><span>0 %</span><span>Meta ${meta()} %</span><span>100 %</span></div></div></div>
+      ${kpi('warn', tardes, 'Llegadas tarde', `${I.tot('minT')} min de retraso en total`, 'clock')}
+      ${kpi('warn', I.tot('almL'), 'Almuerzos largos', `Más de ${tol().almuerzo} min sobre lo permitido`, 'lunch')}
+      ${kpi('warn', I.tot('temp'), 'Salidas antes de hora', '', 'out')}
+      ${kpi('bad', I.tot('aus'), 'Jornadas sin marcar', 'Programadas en la malla', 'x')}
+      ${kpi('mute', I.tot('just'), 'Ausencias con permiso', 'Vacaciones, permisos e incapacidades aprobadas', 'plane')}
+      ${kpi('mute', horasTxt(I.tot('extra')), 'Horas extra', 'Salidas 30 min o más después', 'moon')}
+    </div>
+    <div class="grid-rep">
+      <section class="card chartbox"><h3>Llegadas tarde por día</h3><div class="sub">Pasa el cursor sobre un día para ver quién llegó tarde.</div>
+        <div class="chart" id="chartDias">${I.dias.length ? graficaDias(I) : '<p class="hint">Sin días cerrados con horario.</p>'}</div><div class="tip" id="tip" hidden></div></section>
+      <section class="card rankbox"><h3>¿Quién llegó más tarde?</h3><div class="sub">Minutos de retraso acumulados en el mes. Toca un nombre para ver el detalle.</div>
+        <div class="rank">${rk.length ? rk.map((x, i) => `<button type="button" data-selinf="${x.p.id}" class="${S.inf.sel === x.p.id ? 'sel' : ''}"><span class="pos">${i + 1}</span><span class="nm">${esc(x.p.nombre)}</span>
+          <span class="track"><span class="fill" style="display:block;width:${Math.max(3, x.minT / maxR * 100)}%"></span></span><span class="val">${x.minT} min · ${x.tardes} ${x.tardes === 1 ? 'vez' : 'veces'}</span></button>`).join('')
+          : '<p class="hint">Nadie llegó tarde este mes.</p>'}</div></section></div>
+    ${sel ? `<section class="card detail"><div class="sec-h" style="margin:0"><h3 style="font-size:18px">${esc(sel.p.nombre)} · ${esc(mes)}</h3><button type="button" class="link" data-selinf="">Cerrar detalle</button></div>
+      <div class="hint">${sel.dias} jornadas · ${sel.tardes} llegadas tarde · ${sel.almL} almuerzos largos · ${sel.temp} salidas antes · ${sel.aus} sin marcar · ${sel.just} con permiso · ${sel.sinConf} comunicados sin confirmar</div>
+      <div class="days">${sel.detalle.length ? sel.detalle.sort((a, b) => a.f < b.f ? -1 : 1).map(d => `<span class="chip ${d.cls}">${esc(fechaCorta(d.f))} · ${esc(d.txt)}</span>`).join('') : '<span class="chip ok">Sin novedades en el mes</span>'}</div></section>` : ''}
+    <section style="margin-top:28px"><div class="sec-h"><h2>Confirmación de comunicados</h2><span class="hint">${I.coms.length ? `${totD ? Math.round(totC / totD * 100) : 100} % confirmados · ${totD - totC} pendientes en ${esc(mes)}` : ''}</span></div>
+      ${I.coms.length ? `<div class="card tablewrap"><table class="lect"><thead><tr><th>Comunicado</th><th>Confirmaron</th><th>Faltan por confirmar</th></tr></thead><tbody>
+        ${I.coms.map(x => `<tr><td class="tit"><b>${esc(x.c.titulo)}</b><span class="hint">${esc(cuando(x.c.creado))} · Para: ${esc(paraTexto(x.c))}</span></td>
+          <td><span class="num" style="font-weight:600;color:var(--navy)">${x.conf.length} de ${x.dest.length}</span><div class="bar" style="margin-top:6px"><span style="width:${Math.round(x.conf.length / x.dest.length * 100)}%"></span></div></td>
+          <td>${x.faltan.length ? `<div class="falt">${x.faltan.map(p => `<span class="chip warn">${esc(p.nombre)}</span>`).join('')}</div>` : '<span class="chip ok">Todos confirmaron</span>'}</td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="card vacio">En ${esc(mes)} no hubo comunicados con confirmación de lectura para este grupo.</div>`}</section>
+    <section style="margin-top:28px"><div class="sec-h"><h2>Detalle por persona</h2><span class="hint">Solo aparecen quienes tienen turnos en la malla del mes · toca una columna para ordenar o una fila para ver sus días</span></div>
+      <div class="card tablewrap"><table><thead><tr><th>Persona</th><th class="n">Jornadas</th>${th('tardes', 'Llegadas tarde')}${th('minT', 'Min. tarde')}<th class="n">Promedio</th>${th('almL', 'Almuerzos largos')}${th('temp', 'Salidas antes')}${th('extra', 'Horas extra')}${th('aus', 'Sin marcar')}${th('just', 'Con permiso')}${th('sinConf', 'Comunicados sin confirmar')}${th('punt', 'Puntualidad')}</tr></thead><tbody>
+        ${orden.map(x => `<tr class="clickable ${S.inf.sel === x.p.id ? 'hl' : ''}" data-selinf="${x.p.id}"><td><div class="person"><div class="avatar soft">${initials(x.p.nombre)}</div><div><b>${esc(x.p.nombre)}</b><small>${esc(area(x.p.area_id).nombre)} · ${esc(sede(x.p.sede_id).nombre)}</small></div></div></td>
+          <td class="n">${x.dias}</td><td class="n">${x.tardes}</td><td class="n">${x.minT}</td><td class="n">${x.tardes ? Math.round(x.minT / x.tardes) : 0}</td><td class="n">${x.almL}</td><td class="n">${x.temp}</td>
+          <td class="n">${horasTxt(x.extra)}</td><td class="n">${x.aus}</td><td class="n">${x.just}</td><td class="n">${x.sinConf ? `<span class="chip warn">${x.sinConf}</span>` : '0'}</td>
+          <td class="n"><span class="chip ${x.dias ? pcCls(pc(x)) : 'mute'}">${x.dias ? pc(x) + ' %' : '—'}</span></td></tr>`).join('') || '<tr><td colspan="12" class="vacio">No hay personas en este grupo.</td></tr>'}
+      </tbody></table></div></section>`;
+}
+function exportarInforme() {
+  const I = calcularInforme(), pc = x => x.dias ? Math.round((1 - x.tardes / x.dias) * 100) : '';
+  const filas = [['Persona', 'Correo', 'Sede', 'Área', 'Jornadas', 'Llegadas tarde', 'Minutos tarde', 'Promedio tarde (min)', 'Almuerzos largos', 'Salidas antes', 'Horas extra (min)', 'Sin marcar', 'Con permiso', 'Comunicados sin confirmar', 'Puntualidad %'],
+    ...I.lista.map(x => [x.p.nombre, x.p.correo, sede(x.p.sede_id).nombre, area(x.p.area_id).nombre, x.dias, x.tardes, x.minT, x.tardes ? Math.round(x.minT / x.tardes) : 0, x.almL, x.temp, x.extra, x.aus, x.just, x.sinConf, pc(x)])];
+  const csv = '﻿' + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `asistencia-${S.inf.mes}${S.inf.sede ? '-' + slug(sede(S.inf.sede).nombre) : ''}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  toast('Informe descargado. Ábrelo con Excel.');
+}
+
 /* ── Equipo: cuentas (administración) ── */
 function claveTemporal() {
   const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = new Uint32Array(10); crypto.getRandomValues(r);
@@ -735,6 +874,7 @@ async function ir(view) {
     if (view === 'comunicados') await cargarComunicados();
     if (view === 'solicitudes') await cargarSolicitudes();
     if (view === 'asistencia') await cargarAsistencia();
+    if (view === 'informes') await cargarInforme();
     if (view === 'equipo') await recargarPersonas();
   } catch (e) { toast(errorTexto(e)); }
   render(); window.scrollTo(0, 0);
@@ -788,10 +928,17 @@ document.addEventListener('submit', async e => {
 });
 
 document.addEventListener('click', async e => {
+  const fila = e.target.closest('tr[data-selinf], th[data-orden]');
+  if (fila && !e.target.closest('button')) {
+    if (fila.dataset.orden) S.inf.orden = fila.dataset.orden; else S.inf.sel = S.inf.sel === fila.dataset.selinf ? null : fila.dataset.selinf;
+    render(); return;
+  }
   const b = e.target.closest('button'); if (!b) { if (S.menu && !e.target.closest('.menu')) { S.menu = false; render(); } return; }
+  if (b.dataset.selinf !== undefined) { S.inf.sel = b.dataset.selinf && S.inf.sel !== b.dataset.selinf ? b.dataset.selinf : null; render(); return; }
   const a = b.dataset.accion;
   if (b.dataset.view) { ir(b.dataset.view); return; }
   if (a === 'menu') { S.menu = !S.menu; render(); return; }
+  if (a === 'exportar') { exportarInforme(); return; }
   if (b.dataset.comf) {
     S.com.filtro = b.dataset.comf;
     if (S.view !== 'comunicados') { await ir('comunicados'); return; }
@@ -934,6 +1081,12 @@ document.addEventListener('change', async e => {
       }
       el.value = ''; document.getElementById('borrador').innerHTML = borradorView(); return;
     }
+    if (el.id === 'iMes' || el.id === 'iSede' || el.id === 'iArea') {
+      if (el.id === 'iMes') { S.inf.mes = el.value; S.inf.datos = null; render(); await cargarInforme(); }
+      if (el.id === 'iSede') S.inf.sede = Number(el.value);
+      if (el.id === 'iArea') S.inf.area = Number(el.value);
+      S.inf.sel = null; render(); return;
+    }
     if (el.id === 'mSede') { S.malla.sede = Number(el.value); render(); return; }
     if (el.id === 'tSede') { S.turnoSede = Number(el.value); render(); return; }
     if (el.dataset.turno) {
@@ -954,6 +1107,19 @@ document.addEventListener('change', async e => {
 document.addEventListener('input', e => {
   if (e.target.id === 'qCom') { S.com.q = e.target.value; document.getElementById('listaCom').innerHTML = listaComunicados(); return; }
   if (e.target.id === 'eFiltro') { S.equipo.filtro = e.target.value; const pos = e.target.selectionStart; render(); const n = document.getElementById('eFiltro'); n.focus(); n.setSelectionRange(pos, pos); }
+});
+document.addEventListener('mousemove', e => {
+  const tip = document.getElementById('tip'); if (!tip || !S.inf.datos) return;
+  const g = e.target.closest && e.target.closest('#chartDias g[data-dia]');
+  document.querySelectorAll('#chartDias g.on').forEach(x => x !== g && x.classList.remove('on'));
+  if (!g) { tip.hidden = true; return; }
+  g.classList.add('on');
+  const d = Number(g.dataset.dia), lst = (calcularInforme().porDia[d] || []).slice().sort((a, b) => b.min - a.min);
+  tip.innerHTML = `<b>${esc(fechaLarga(`${S.inf.mes}-${String(d).padStart(2, '0')}`))}</b><br>${lst.length ? `${lst.length} ${lst.length === 1 ? 'llegada tarde' : 'llegadas tarde'}<br>${lst.map(x => `${esc(x.n)} · ${x.min} min`).join('<br>')}` : 'Nadie llegó tarde'}`;
+  tip.hidden = false;
+  const box = g.closest('.chartbox').getBoundingClientRect();
+  let x = e.clientX - box.left + 14; if (x + 240 > box.width) x = e.clientX - box.left - 250;
+  tip.style.left = x + 'px'; tip.style.top = (e.clientY - box.top + 14) + 'px';
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && (S.menu || S.lb)) { S.menu = false; S.lb = null; render(); }

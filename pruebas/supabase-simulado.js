@@ -4,7 +4,7 @@
   const hoyTz = tz => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
   const ADMIN = '00000000-0000-0000-0000-00000000000a';
   const DB = {
-    sedes: [{ id: 1, nombre: 'Bogotá', zona_horaria: 'America/Bogota' }, { id: 2, nombre: 'República Dominicana', zona_horaria: 'America/Santo_Domingo' }],
+    sedes: [{ id: 1, nombre: 'Colombia', zona_horaria: 'America/Bogota' }, { id: 2, nombre: 'República Dominicana', zona_horaria: 'America/Santo_Domingo' }],
     areas: [{ id: 1, nombre: 'Dirección / Gerencia' }, { id: 2, nombre: 'Comercial / KAM' }, { id: 3, nombre: 'Operaciones / Reservas' }, { id: 4, nombre: 'Administración / Finanzas' }],
     turnos: [], herramientas: [
       { id: 1, nombre: 'OMNIAXIS', descripcion: 'Operaciones en AppSheet.', icono: 'compass', pie: 'Operaciones', url: 'https://example.com', orden: 1, activo: true },
@@ -17,10 +17,30 @@
   for (const s of [1, 2]) for (const [c, n, e, a, r, sa] of [['M', 'Mañana', '08:00:00', '12:30:00', '13:30:00', '17:30:00'], ['T', 'Tarde', '10:00:00', '14:00:00', '15:00:00', '19:00:00'], ['S', 'Sábado', '09:00:00', null, null, '13:00:00'], ['D', 'Descanso', null, null, null, null]])
     DB.turnos.push({ id: tid++, sede_id: s, codigo: c, nombre: n, entrada: e, salida_almuerzo: a, regreso_almuerzo: r, salida: sa, activo: true });
   DB.malla.push({ persona_id: ADMIN, fecha: hoyTz('America/Bogota'), turno_id: 1 });
+  // Equipo de ejemplo con 45 días de jornadas, para probar los informes.
+  const ejemplo = [['Camilo Herrera', 2, 1, .05], ['Natalia Suárez', 3, 1, .1], ['Felipe Arango', 2, 1, .3], ['Yoselin Matos', 2, 2, .15]];
+  let semilla = 7; const azar = () => (semilla = (semilla * 9301 + 49297) % 233280) / 233280;
+  const iso = d => d.toISOString().slice(0, 10), hoy = new Date(hoyTz('America/Bogota') + 'T12:00:00Z');
+  ejemplo.forEach(([nombre, areaId, sedeId, prop], k) => {
+    const id = `00000000-0000-0000-0000-0000000001${k}0`;
+    DB.perfiles.push({ id, nombre, correo: `${nombre.split(' ')[0].toLowerCase()}@x.co`, sede_id: sedeId, area_id: areaId, rol: 'colaborador', es_admin: false, activo: true, acepto_datos: '2026-01-01' });
+    const tz = sedeId === 1 ? 'America/Bogota' : 'America/Santo_Domingo', off = sedeId === 1 ? 5 : 4;
+    for (let i = 1; i <= 45; i++) {
+      const d = new Date(hoy); d.setUTCDate(d.getUTCDate() - i); if (d.getUTCDay() === 0) continue;
+      const tId = DB.turnos.find(t => t.sede_id === sedeId && t.codigo === (d.getUTCDay() === 6 ? 'S' : 'M')).id, t = DB.turnos.find(x => x.id === tId);
+      DB.malla.push({ persona_id: id, fecha: iso(d), turno_id: tId });
+      if (azar() < .03) continue;
+      const hm = (base, delta) => { const [h, m] = base.split(':').map(Number), tot = h * 60 + m + delta; return new Date(`${iso(d)}T${String(Math.floor(tot / 60) + off).padStart(2, '0')}:${String(tot % 60).padStart(2, '0')}:00Z`).toISOString(); };
+      const tarde = azar() < prop ? 6 + Math.floor(azar() * 35) : -8 + Math.floor(azar() * 10);
+      DB.marcas.push({ persona_id: id, fecha: iso(d), tipo: 'entrada', hora: hm(t.entrada, tarde) });
+      if (t.salida_almuerzo) { DB.marcas.push({ persona_id: id, fecha: iso(d), tipo: 'salida_almuerzo', hora: hm(t.salida_almuerzo, 0) }); DB.marcas.push({ persona_id: id, fecha: iso(d), tipo: 'regreso_almuerzo', hora: hm(t.regreso_almuerzo, azar() < .1 ? 20 : 0) }); }
+      DB.marcas.push({ persona_id: id, fecha: iso(d), tipo: 'salida', hora: hm(t.salida, azar() < .1 ? -15 : azar() < .2 ? 45 : 5) });
+    }
+  });
   let sesion = null, meta = { debe_cambiar_contrasena: true };
   class Q {
     constructor(t) { this.t = t; this.f = []; this.op = 'select'; this.one = false; }
-    select() { this.sel = true; return this; } order() { return this; } limit() { return this; }
+    select() { this.sel = true; return this; } order() { return this; } limit() { return this; } range(a, b) { this.rg = [a, b]; return this; }
     single() { this.one = true; return this; }
     insert(v) { this.op = 'insert'; this.v = [].concat(v); return this; }
     eq(c, v) { this.f.push(r => String(r[c]) === String(v)); return this; }
@@ -38,7 +58,8 @@
       if (this.op === 'update') { T.filter(m).forEach(r => Object.assign(r, this.v)); return { data: null, error: null }; }
       if (this.op === 'delete') { DB[this.t] = T.filter(r => !m(r)); return { data: null, error: null }; }
       const rows = T.filter(m).map(r => ({ ...r }));
-      return { data: this.one ? (rows[0] || null) : rows, error: null };
+      const out = this.rg ? rows.slice(this.rg[0], this.rg[1] + 1) : rows;
+      return { data: this.one ? (out[0] || null) : out, error: null };
     }
   }
   let actual = ADMIN;

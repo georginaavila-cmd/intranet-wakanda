@@ -463,7 +463,7 @@ create policy archivos_soportes_subir on storage.objects for insert to authentic
 -- Sedes, áreas, turnos de ejemplo, herramientas y configuración. Todo se puede cambiar después desde la intranet.
 
 insert into sedes (nombre, zona_horaria) values
-  ('Bogotá', 'America/Bogota'),
+  ('Colombia', 'America/Bogota'),
   ('República Dominicana', 'America/Santo_Domingo');
 
 insert into areas (nombre) values
