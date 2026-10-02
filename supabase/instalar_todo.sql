@@ -464,7 +464,7 @@ create policy archivos_soportes_subir on storage.objects for insert to authentic
 
 insert into sedes (nombre, zona_horaria) values
   ('Bogotá', 'America/Bogota'),
-  ('Santo Domingo', 'America/Santo_Domingo');
+  ('República Dominicana', 'America/Santo_Domingo');
 
 insert into areas (nombre) values
   ('Dirección / Gerencia'),

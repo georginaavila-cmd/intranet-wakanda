@@ -3,7 +3,7 @@
 
 insert into sedes (nombre, zona_horaria) values
   ('Bogotá', 'America/Bogota'),
-  ('Santo Domingo', 'America/Santo_Domingo');
+  ('República Dominicana', 'America/Santo_Domingo');
 
 insert into areas (nombre) values
   ('Dirección / Gerencia'),
@@ -35,3 +35,5 @@ insert into configuracion (clave, valor) values
   ('tolerancias', '{"entrada_min": 5, "almuerzo_min": 5}'),     -- minutos antes de contar tarde / almuerzo largo
   ('meta_puntualidad', '{"porcentaje": 95}'),
   ('validar_ip', '{"activo": false}');                          -- se activa en la etapa final, desde la oficina
+
+-- 2 de octubre de 2026: la sede de Santo Domingo se llama "República Dominicana" (ya aplicado en Supabase).

@@ -4,7 +4,7 @@
   const hoyTz = tz => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
   const ADMIN = '00000000-0000-0000-0000-00000000000a';
   const DB = {
-    sedes: [{ id: 1, nombre: 'Bogotá', zona_horaria: 'America/Bogota' }, { id: 2, nombre: 'Santo Domingo', zona_horaria: 'America/Santo_Domingo' }],
+    sedes: [{ id: 1, nombre: 'Bogotá', zona_horaria: 'America/Bogota' }, { id: 2, nombre: 'República Dominicana', zona_horaria: 'America/Santo_Domingo' }],
     areas: [{ id: 1, nombre: 'Dirección / Gerencia' }, { id: 2, nombre: 'Comercial / KAM' }, { id: 3, nombre: 'Operaciones / Reservas' }, { id: 4, nombre: 'Administración / Finanzas' }],
     turnos: [], herramientas: [
       { id: 1, nombre: 'OMNIAXIS', descripcion: 'Operaciones en AppSheet.', icono: 'compass', pie: 'Operaciones', url: 'https://example.com', orden: 1, activo: true },
