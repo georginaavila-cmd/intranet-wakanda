@@ -9,9 +9,9 @@
     turnos: [], herramientas: [
       { id: 1, nombre: 'OMNIAXIS', descripcion: 'Operaciones en AppSheet.', icono: 'compass', pie: 'Operaciones', url: 'https://example.com', orden: 1, activo: true },
       { id: 2, nombre: 'KAM 360', descripcion: 'Equipo comercial.', icono: 'target', pie: 'Comercial', url: 'https://example.com', orden: 2, activo: true }],
-    configuracion: [{ clave: 'tolerancias', valor: { entrada_min: 5, almuerzo_min: 5 } }, { clave: 'validar_ip', valor: { activo: false } }],
+    configuracion: [{ clave: 'tolerancias', valor: { entrada_min: 5, almuerzo_min: 5 } }, { clave: 'validar_ip', valor: { activo: false } }, { clave: 'modulo_solicitudes', valor: { activo: false } }],
     perfiles: [{ id: ADMIN, nombre: 'Georgina Ávila', correo: 'georgina.avila@wakanda.travel', sede_id: 1, area_id: 1, rol: 'gerente', es_admin: true, activo: true, acepto_datos: null }],
-    malla: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: []
+    malla: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: []
   };
   let tid = 1;
   for (const s of [1, 2]) for (const [c, n, e, a, r, sa] of [['M', 'Mañana', '08:00:00', '12:30:00', '13:30:00', '17:30:00'], ['T', 'Tarde', '10:00:00', '14:00:00', '15:00:00', '19:00:00'], ['S', 'Sábado', '09:00:00', null, null, '13:00:00'], ['D', 'Descanso', null, null, null, null]])
@@ -33,7 +33,7 @@
     then(ok, ko) { return Promise.resolve(this.run()).then(ok, ko); }
     run() {
       const T = DB[this.t], m = r => this.f.every(f => f(r));
-      if (this.op === 'insert') { const out = this.v.map(v => { const r = { id: (T.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1), creado: new Date().toISOString(), ...v }; T.push(r); return r; }); return { data: this.one ? out[0] : out, error: null }; }
+      if (this.op === 'insert') { const out = this.v.map(v => { const r = { id: (T.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1), creado: new Date().toISOString(), ...(this.t === 'solicitudes' ? { estado: 'pendiente' } : {}), ...v }; T.push(r); return r; }); return { data: this.one ? out[0] : out, error: null }; }
       if (this.op === 'upsert') { for (const v of this.v) { const i = T.findIndex(r => r.persona_id === v.persona_id && r.fecha === v.fecha); if (i >= 0) T[i] = { ...T[i], ...v }; else T.push(v); } return { data: null, error: null }; }
       if (this.op === 'update') { T.filter(m).forEach(r => Object.assign(r, this.v)); return { data: null, error: null }; }
       if (this.op === 'delete') { DB[this.t] = T.filter(r => !m(r)); return { data: null, error: null }; }
@@ -59,6 +59,8 @@
         if (DB.marcas.some(x => x.persona_id === ADMIN && x.fecha === f && x.tipo === args.p_tipo)) return { error: { message: 'ERROR: Ya marcaste entrada hoy.' } };
         DB.marcas.push({ persona_id: ADMIN, fecha: f, tipo: args.p_tipo, hora: new Date(Date.now() - 3600e3 * (4 - DB.marcas.length)).toISOString() }); return { data: {}, error: null };
       }
+      if (fn === 'revisar_solicitud') { const x = DB.solicitudes.find(y => y.id === args.p_id); if (x.persona_id === actual) return { error: { message: 'ERROR: No puedes revisar tus propias solicitudes.' } }; Object.assign(x, { estado: args.p_aprobar ? 'aprobada' : 'rechazada', revisado_por: actual, comentario: args.p_comentario }); return { data: x, error: null }; }
+      if (fn === 'ausencias_aprobadas') return { data: DB.solicitudes.filter(x => x.estado === 'aprobada' && !x.hora_desde && x.desde <= args.p_hasta && x.hasta >= args.p_desde), error: null };
       return { error: { message: 'rpc desconocida' } };
     },
     storage: { from: () => ({

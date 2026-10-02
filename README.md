@@ -1,6 +1,6 @@
 # Intranet Wakanda Travel
 
-Intranet del equipo de Wakanda Travel: pase de jornada (entrada, almuerzo y salida), malla de horarios, turnos, asistencia del día, comunicados con imágenes y confirmación de lectura, y administración de cuentas. Solicitudes e informes llegan en las siguientes entregas.
+Intranet del equipo de Wakanda Travel: pase de jornada (entrada, almuerzo y salida), malla de horarios, turnos, asistencia del día, comunicados con imágenes y confirmación de lectura, solicitudes de vacaciones, permisos e incapacidades, y administración de cuentas. Los informes mensuales llegan en la siguiente entrega.
 
 - **Página:** https://georginaavila-cmd.github.io/intranet-wakanda/ (GitHub Pages, rama `main`)
 - **Datos:** Supabase, proyecto `tlppvxbusfocsgqppnbr` (East US). Cuenta dueña: `georgina.avila@wakanda.travel`.
