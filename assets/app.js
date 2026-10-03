@@ -206,18 +206,69 @@ function appView() {
   if (moduloSol() || esGerencia()) tabs.push(['solicitudes', 'Solicitudes']);
   if (p.es_admin) tabs.push(['equipo', 'Equipo']);
   const pendSol = moduloSol() ? porRevisar().filter(x => puedeAprobar(x)).length : 0;
-  const vistas = { informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, clave: () => claveView(false) };
+  const vistas = { informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, guia: guiaView, clave: () => claveView(false) };
   const rol = { gerente: 'Gerente', directora: 'Directora', colaborador: 'Colaborador' }[p.rol] + (p.es_admin ? ' · administración' : '');
   return `<header class="top"><div class="wrap">
       <div class="brand"><img src="assets/logo-wakanda.png" alt=""><span>Wakanda Travel</span></div>
       <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}${k === 'comunicados' && pendCom ? `<span class="badge" aria-label="${pendCom} sin confirmar">${pendCom}</span>` : ''}${k === 'solicitudes' && pendSol ? `<span class="badge" aria-label="${pendSol} por revisar">${pendSol}</span>` : ''}</button>`).join('')}</nav>
       <div class="menu"><button type="button" data-accion="menu" aria-expanded="${S.menu}" aria-label="Menú de ${esc(p.nombre)}"><span class="avatar">${initials(p.nombre)}</span></button>
         ${S.menu ? `<div class="menu-pop"><div class="who"><b>${esc(p.nombre)}</b>${esc(rol)} · ${esc(sede(p.sede_id).nombre)}</div>
-          <button type="button" data-view="clave">Cambiar contraseña</button><button type="button" data-accion="salir">Cerrar sesión</button></div>` : ''}</div>
+          <button type="button" data-view="guia">Guía de uso</button><button type="button" data-view="clave">Cambiar contraseña</button><button type="button" data-accion="salir">Cerrar sesión</button></div>` : ''}</div>
     </div></header>
     <main class="wrap">${(vistas[S.view] || inicioView)()}</main>
     <footer class="foot-site"><div class="wrap"><span><b>Wakanda Travel</b> — Diseñadores de viajes, diseñadores de sueños</span><span>Intranet · RNT 101438</span></div></footer>
     ${lightboxView()}`;
+}
+
+/* ── Guía de uso (cada persona ve las partes que le aplican) ── */
+function guiaView() {
+  const partes = [
+    { id: 'g-entrar', t: 'Entrar la primera vez', html: `
+      <ol><li>Abre la intranet y entra con tu correo corporativo y la contraseña temporal que te entregó la gerencia.</li>
+      <li>La intranet te pedirá crear tu propia contraseña (mínimo 8 caracteres). Nadie más la conoce.</li>
+      <li>Lee y acepta el tratamiento de datos. Solo se pide una vez.</li></ol>
+      <p>Tu cuenta es personal: no la compartas. Para cambiar la contraseña, toca tu inicial arriba a la derecha y elige <b>Cambiar contraseña</b>.</p>` },
+    { id: 'g-marcar', t: 'Marcar la jornada', html: `
+      <p>En <b>Inicio</b> está el pase de jornada con cuatro marcas: <b>Entrada</b>, <b>Salida a almuerzo</b>, <b>Regreso de almuerzo</b> y <b>Salida</b>.</p>
+      <ul><li>La hora la pone el sistema, no tu computador.</li>
+      <li>Las marcas van en orden: el botón muestra siempre la siguiente.</li>
+      <li>No se puede marcar dos veces lo mismo en el día.</li>
+      <li>Tu turno sale de la malla. Si llegas más de <b>${tol().entrada} minutos</b> después de tu hora de entrada, cuenta como llegada tarde. El almuerzo cuenta como extendido si pasa <b>${tol().almuerzo} minutos</b> del tiempo permitido.</li>
+      <li>Si tu turno de hoy no está en la malla, igual puedes marcar. Avísale a tu líder.</li>
+      <li>Si tienes vacaciones, permiso o incapacidad aprobados, verás <b>Hoy no tienes que marcar</b> y el día queda justificado.</li></ul>
+      <p><b>¿Se te olvidó marcar o marcaste mal?</b> Escríbele a tu líder el mismo día con la hora real.</p>` },
+    { id: 'g-equipo', t: 'Malla, comunicados y herramientas', html: `
+      <p><b>Malla.</b> En <b>Malla</b> ves los turnos de tu sede semana a semana. Solo las líderes la cambian, y cualquier cambio se refleja de inmediato.</p>
+      <p><b>Comunicados.</b> El número rojo en <b>Comunicados</b> indica cuántos tienes sin confirmar. Léelos y toca <b>Confirmar lectura</b>: la gerencia ve quién ya los leyó. Las imágenes se abren en grande al tocarlas y el buscador encuentra comunicados por palabra.</p>
+      <p><b>Herramientas.</b> Desde <b>Inicio</b> abres OMNIAXIS, Wakanda Documentos y KAM 360.</p>` },
+    { id: 'g-sol', t: 'Vacaciones, permisos e incapacidades', si: moduloSol() || esGerencia(), html: `
+      <p>En <b>Solicitudes</b> pides vacaciones o permisos y reportas incapacidades:</p>
+      <ol><li>Elige el tipo y las fechas.</li><li>Escribe el motivo.</li><li>Si tienes soporte, adjunta una foto o un PDF (es opcional).</li></ol>
+      <p>Verás si está <b>Pendiente</b>, <b>Aprobada</b> o <b>Rechazada</b>, con el comentario de quien la revisó. Mientras esté pendiente puedes cancelarla.</p>` },
+    { id: 'g-lider', t: 'Para las líderes de sede', si: esLider(), html: `
+      <p><b>Turnos.</b> Al final de la pestaña <b>Malla</b> están los turnos de tu sede. Ajusta los de ejemplo a los horarios reales (entrada, almuerzo y salida) o crea los que falten.</p>
+      <p><b>Malla semanal.</b> Elige la semana y asigna a cada persona su turno por día. Si la semana se repite, usa <b>Copiar la semana anterior</b> y cambia solo lo distinto. Cada cambio queda registrado y los informes se recalculan solos.</p>
+      <p><b>Asistencia.</b> Muestra el día: quién marcó, quién llegó tarde, quién falta y quién tiene una ausencia aprobada.</p>
+      <p><b>Informes.</b> Elige el mes: puntualidad, quién llegó más tarde, detalle por persona y comunicados sin confirmar. Solo cuentan los días ya cerrados. Con <b>Exportar a Excel</b> descargas los datos.</p>
+      <p><b>Comunicados.</b> Puedes publicar comunicados, con imágenes, y pedir confirmación de lectura.</p>` },
+    { id: 'g-gerencia', t: 'Para la gerencia y administración', si: esGerencia(), html: `
+      ${P().es_admin ? `<p><b>Cuentas</b> (pestaña <b>Equipo</b>).</p>
+      <ul><li><b>Crear:</b> nombre, correo corporativo, sede, área y rol. La contraseña temporal se muestra <b>una sola vez</b>: cópiala y entrégala en privado. La persona la cambia al primer ingreso.</li>
+      <li><b>Restablecer contraseña:</b> para quien la olvidó.</li>
+      <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li></ul>` : ''}
+      <p><b>Solicitudes.</b> En <b>Solicitudes</b> activas o apagas el módulo para todo el equipo y asignas los <b>revisores</b>: quién puede ver, aprobar y rechazar, por sede y por tipo (por ejemplo, contabilidad para incapacidades). Las directoras solo revisan si las asignas. Nadie aprueba sus propias solicitudes.</p>
+      <p><b>Informes.</b> Ves ambas sedes o una sola, con los indicadores del mes, la gráfica por día, el ranking de llegadas tarde y la confirmación de comunicados.</p>` },
+    { id: 'g-faq', t: 'Preguntas frecuentes', html: `
+      <p><b>Olvidé mi contraseña.</b> Pídele a la gerencia que la restablezca; recibirás una temporal.</p>
+      <p><b>¿Puedo marcar desde el celular?</b> ${S.config.validar_ip && S.config.validar_ip.activo ? 'No. Solo se puede marcar desde la oficina.' : 'Pronto solo se podrá marcar desde la oficina y tu computador asignado. Acostúmbrate a marcar desde tu puesto.'}</p>
+      <p><b>Mi turno no es el que aparece.</b> Habla con tu directora para que corrija la malla.</p>
+      ${moduloSol() || esGerencia() ? '' : '<p><b>No veo Solicitudes.</b> El módulo está apagado; la gerencia decide cuándo activarlo.</p>'}
+      <p><b>¿A quién acudo?</b> Turnos, malla y marcas: tu directora de operaciones. Cuentas y contraseñas: la gerencia. Solicitudes: quien las revisa o la gerencia.</p>` }
+  ].filter(x => x.si !== false);
+  return `<div class="hello"><div><div class="eyebrow">Ayuda</div><h1>Guía de <em>uso</em></h1>
+      <p>Todo lo que necesitas para usar la intranet. Solo ves las partes que aplican a tu rol.</p></div></div>
+    <div class="guia"><nav class="card guia-indice" aria-label="Contenido">${partes.map(x => `<button type="button" data-guia="${x.id}">${esc(x.t)}</button>`).join('')}</nav>
+      <div class="guia-texto">${partes.map(x => `<section class="card" id="${x.id}"><h2>${esc(x.t)}</h2>${x.html}</section>`).join('')}</div></div>`;
 }
 
 /* ── Inicio: pase de jornada ── */
@@ -251,7 +302,7 @@ function inicioView() {
   const saludo = h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches';
   return `<div class="hello"><div><div class="eyebrow">Intranet · ${esc(fechaLarga(S.hoy.fecha))}</div>
       <h1>${saludo}, <em>${esc(p.nombre.split(' ')[0])}</em></h1>
-      <p>${esc(area(p.area_id).nombre)} · Sede ${esc(sede(p.sede_id).nombre)}. Marca tu jornada y abre tus herramientas desde aquí.</p></div></div>
+      <p>${esc(area(p.area_id).nombre)} · Sede ${esc(sede(p.sede_id).nombre)}. Marca tu jornada y abre tus herramientas desde aquí.</p></div><button class="btn ghost sm" type="button" data-view="guia">¿Dudas? Guía de uso</button></div>
     ${avisoLectura()}
     <div class="grid-home"><div class="col">${paseView()}
       <section><div class="sec-h"><h2>Herramientas</h2><span class="hint">Se abren en una pestaña nueva</span></div>${herramientasView()}</section></div>
@@ -934,6 +985,7 @@ document.addEventListener('click', async e => {
     render(); return;
   }
   const b = e.target.closest('button'); if (!b) { if (S.menu && !e.target.closest('.menu')) { S.menu = false; render(); } return; }
+  if (b.dataset.guia) { document.getElementById(b.dataset.guia)?.scrollIntoView({ behavior: 'smooth' }); return; }
   if (b.dataset.selinf !== undefined) { S.inf.sel = b.dataset.selinf && S.inf.sel !== b.dataset.selinf ? b.dataset.selinf : null; render(); return; }
   const a = b.dataset.accion;
   if (b.dataset.view) { ir(b.dataset.view); return; }
