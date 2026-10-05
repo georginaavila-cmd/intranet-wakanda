@@ -43,3 +43,27 @@ select.shift.t-none { background: #fff; color: var(--ink-3); box-shadow: inset 0
 td.cambio select.shift, td.cambio .shift { box-shadow: 0 0 0 2px var(--teal); }
 td > small.num { display: block; font-size: 11px; color: var(--ink-3); margin-top: 3px; text-align: center; }
 table.fijo select.shift { width: 100%; min-width: 120px; }
+/* Malla: chips de color por franja, celdas que se tocan para cambiar, grupos por área y leyenda */
+table.malla td, table.malla th { padding: 6px 6px; text-align: center; }
+table.malla td:first-child, table.malla th:first-child { text-align: left; padding-left: 14px; }
+table.malla tr.grupo th { background: var(--blue-050); color: var(--navy); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; text-align: left; padding: 8px 14px; }
+table.malla .person small { font-size: 12px; }
+.chipt { display: inline-flex; justify-content: center; align-items: center; min-width: 92px; padding: 6px 8px; border-radius: 8px; font-weight: 600; font-size: 13px; font-style: normal; white-space: nowrap; }
+.chipt.t-none { background: transparent; color: var(--ink-3); }
+.chipt.cambio { box-shadow: 0 0 0 2px var(--teal); }
+button.celda { border: 0; background: none; padding: 0; border-radius: 8px; cursor: pointer; }
+button.celda:hover .chipt { box-shadow: inset 0 0 0 2px var(--blue-200); }
+button.celda:hover .chipt.cambio { box-shadow: 0 0 0 2px var(--teal), inset 0 0 0 2px var(--blue-200); }
+table.malla select.shift { min-width: 92px; max-width: 220px; text-align-last: left; }
+.leyenda { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; font-size: 13px; color: var(--ink-2); }
+.leyenda .chipt { min-width: 0; padding: 3px 8px; font-size: 12px; margin-right: 4px; }
+.f0 { background: #e3edf8; color: #24548a; }
+.f1 { background: #def3f1; color: #0f6b63; }
+.f2 { background: #f7f2d6; color: #6f6300; }
+.f3 { background: #fbe6ec; color: #a2435d; }
+.f4 { background: #ece6f8; color: #5b3f97; }
+.f5 { background: #e5f3e3; color: #2f6b2a; }
+.f6 { background: #fdeee0; color: #94531a; }
+.f7 { background: #e0f0f8; color: #1d5f80; }
+.f8 { background: #f4e9e1; color: #7a4b2a; }
+.f9 { background: #eaecef; color: #3f4a59; }

@@ -73,7 +73,7 @@ const S = {
   sedes: [], areas: [], turnos: [], herramientas: [], personas: [], config: {},
   view: 'inicio', menu: false,
   hoy: { malla: null, marcas: [], semana: [] },
-  malla: { lunes: null, sede: null, filas: [], base: [] },
+  malla: { lunes: null, sede: null, filas: [], base: [], vista: 'semana', edit: null, guardando: false },
   turnoSede: null,
   asistencia: { filas: [] },
   equipo: { claveNueva: null, filtro: '' },
@@ -409,42 +409,81 @@ async function cargarMalla() {
   ]);
   if ((esLider() || P().rol === 'supervisor') && !S.turnoSede) S.turnoSede = esGerencia() || P().rol === 'supervisor' ? S.sedes[0]?.id : P().sede_id;
 }
+// Color de cada franja: el mismo turno siempre con el mismo color, ordenado por hora de entrada.
+const colorTurno = t => {
+  if (!t) return 't-none';
+  if (!t.entrada) return t.codigo === 'V' ? 't-V' : 't-D';
+  const orden = S.turnos.filter(y => y.sede_id === t.sede_id && y.entrada).sort((a, b) => a.entrada.localeCompare(b.entrada) || a.salida.localeCompare(b.salida) || a.id - b.id);
+  return `f${orden.findIndex(y => y.id === t.id) % 10}`;
+};
+const chipTxt = t => !t ? '—' : t.entrada ? `${hm(t.entrada)}–${hm(t.salida)}` : t.nombre;
+// Una celda de la malla o del horario fijo: chip de color; al tocarla (si puede editar) se vuelve un selector.
+function celdaTurno({ clave, t, edita, opciones, vacio, cambio, extra = '' }) {
+  const titulo = t ? turnoEtq(t) : vacio;
+  if (edita && S.malla.edit === clave) {
+    return `<select class="shift ${colorTurno(t)}" data-celda="${clave}" autofocus aria-label="Elegir turno">
+      <option value="">${vacio}</option>${opciones.map(o => `<option value="${o.id}" ${t && t.id === o.id ? 'selected' : ''}>${esc(turnoEtq(o))}</option>`).join('')}</select>`;
+  }
+  const chip = `<span class="chipt ${colorTurno(t)} ${cambio ? 'cambio' : ''}" title="${esc(titulo)}${cambio ? ' · cambio puntual' : ''}">${esc(chipTxt(t))}</span>`;
+  return edita ? `<button type="button" class="celda" data-editar="${clave}" aria-label="${esc(titulo)}. Cambiar">${chip}${extra}</button>` : chip;
+}
+// Personas agrupadas por área, en orden alfabético.
+function porArea(gente, fila, cols) {
+  return S.areas.map(a => [a, gente.filter(x => x.area_id === a.id)]).concat([[{ nombre: 'Sin área' }, gente.filter(x => !x.area_id)]])
+    .filter(([, g]) => g.length).map(([a, g]) => `<tr class="grupo"><th colspan="${cols}">${esc(a.nombre)}</th></tr>${g.map(fila).join('')}`).join('');
+}
+function leyendaTurnos(ids) {
+  const ts = [...new Set(ids)].map(turno).filter(t => t && t.entrada).sort((a, b) => a.entrada.localeCompare(b.entrada) || a.salida.localeCompare(b.salida));
+  if (!ts.length) return '';
+  const vistos = new Set(), unicos = ts.filter(t => { const k = turnoEtq(t); if (vistos.has(k)) return false; vistos.add(k); return true; });
+  return `<div class="leyenda">${unicos.map(t => `<span><i class="chipt ${colorTurno(t)}">${esc(chipTxt(t))}</i> ${esc(t.nombre)} · ${t.salida_almuerzo ? `almuerzo ${hm(t.salida_almuerzo)}–${hm(t.regreso_almuerzo)}` : 'sin almuerzo'}</span>`).join('')}</div>`;
+}
+const personaTd = x => `<td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b>${S.malla.sede === 0 && S.sedes.length > 1 ? `<small>${esc(sede(x.sede_id).nombre)}</small>` : ''}</div></div></td>`;
+
 function mallaView() {
+  const puede = esLider() || P().rol === 'supervisor';
+  const vista = puede ? (S.malla.vista || 'semana') : 'semana';
+  const ayuda = vista === 'fijo' ? 'El horario de cada persona, día por día. Se llena una vez y la malla de todas las semanas sale de aquí.'
+    : vista === 'turnos' ? 'Las franjas de horario. Si cambias las horas de un turno, cambian para todas las personas que lo tienen.'
+    : puede ? 'Sale sola del horario fijo de cada persona. Toca una celda para hacer un cambio solo ese día.'
+    : 'La malla es pública: todo el equipo la ve. Solo las líderes, la gerencia y los supervisores pueden cambiarla.';
+  const tabs = puede ? `<div class="seg" role="group" aria-label="Vista de la malla">${[['semana', 'Semana'], ['fijo', 'Horario fijo'], ['turnos', 'Turnos']].map(([k, l]) =>
+    `<button type="button" data-mvista="${k}" aria-pressed="${vista === k}">${l}</button>`).join('')}</div>` : '';
+  const sedeSel = S.sedes.length > 1 && vista !== 'turnos' ? `<select id="mSede" aria-label="Sede"><option value="0" ${S.malla.sede === 0 ? 'selected' : ''}>Todas las sedes</option>${S.sedes.map(x => `<option value="${x.id}" ${S.malla.sede === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select>` : '';
+  const cuerpo = vista === 'fijo' ? horarioFijoView() : vista === 'turnos' ? turnosView() : semanaMallaView();
+  return `<div class="hello"><div><div class="eyebrow">Intranet · malla de horarios</div><h1>Malla de <em>horarios</em></h1><p>${ayuda}</p></div></div>
+    <div class="toolbar">${tabs}<span style="flex:1"></span>${sedeSel}</div>${cuerpo}`;
+}
+function semanaMallaView() {
   const lunes = S.malla.lunes, hoy = fechaEn(miTz());
-  const gente = S.personas.filter(x => x.activo && (S.malla.sede === 0 || x.sede_id === S.malla.sede));
-  const celda = (x, i) => {
+  const gente = S.personas.filter(x => x.activo && (S.malla.sede === 0 || x.sede_id === S.malla.sede)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const usados = [];
+  const fila = x => `<tr>${personaTd(x)}${DIAS.map((_, i) => {
     const f = sumarDias(lunes, i), r = S.malla.filas.find(y => y.persona_id === x.id && y.fecha === f), t = r ? turno(r.turno_id) : null;
-    const cls = `${f === hoy ? 'today' : ''} ${r && r.cambio ? 'cambio' : ''}`, horas = turnoPie(t);
-    if (!editaMalla(x.sede_id)) return `<td class="${cls}"><span class="shift ${claseTurno(t)}">${t ? esc(t.entrada ? `${hm(t.entrada)}–${hm(t.salida)}` : t.nombre) : '—'}</span>${horas}</td>`;
-    const ops = S.turnos.filter(y => y.sede_id === x.sede_id && y.activo);
+    if (t) usados.push(t.id);
     const tieneFijo = S.malla.base.some(b => b.persona_id === x.id);
-    return `<td class="${cls}"><select class="shift ${claseTurno(t)}" data-malla="${x.id}|${f}" aria-label="Turno de ${esc(x.nombre)} el ${DIAS[i]}" title="${r && r.cambio ? 'Cambio puntual de este día' : tieneFijo ? 'Según el horario fijo' : ''}">
-      <option value="">${tieneFijo ? (r && r.cambio ? '↺ Volver al horario fijo' : '—') : '—'}</option>${ops.map(o => `<option value="${o.id}" ${t && t.id === o.id ? 'selected' : ''}>${esc(turnoEtq(o))}</option>`).join('')}</select>${horas}</td>`;
-  };
-  const filas = gente.map(x => `<tr><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(area(x.area_id).nombre)} · ${esc(sede(x.sede_id).nombre)}</small></div></div></td>${DIAS.map((_, i) => celda(x, i)).join('')}</tr>`).join('');
-  const ayuda = P().rol === 'supervisor' ? 'Como supervisor puedes cambiar la malla y los turnos de todas las sedes. Cada cambio queda guardado en el historial.'
-    : !esLider() ? 'La malla es pública: todo el equipo la ve. Solo la directora de cada sede, la gerencia y los supervisores pueden cambiarla.'
-    : esGerencia() ? 'Puedes cambiar los turnos de las dos sedes. Cada cambio queda guardado en el historial.' : `Puedes cambiar los turnos de la sede ${esc(sede(P().sede_id).nombre)}. Cada cambio queda guardado en el historial.`;
-  return `<div class="hello"><div><div class="eyebrow">Intranet · semana del ${esc(fechaCorta(lunes))}</div><h1>Malla de <em>horarios</em></h1><p>${ayuda}</p></div></div>
-    <div class="toolbar"><div class="weeknav"><button class="btn ghost sm" type="button" data-semana="-7">Semana anterior</button><b>${esc(fechaCorta(lunes))} – ${esc(fechaCorta(sumarDias(lunes, 5)))}</b><button class="btn ghost sm" type="button" data-semana="7">Semana siguiente</button></div>
-      <span style="display:flex;gap:8px;flex-wrap:wrap">${S.sedes.length > 1 ? `<select id="mSede" aria-label="Sede"><option value="0" ${S.malla.sede === 0 ? 'selected' : ''}>Las dos sedes</option>${S.sedes.map(s => `<option value="${s.id}" ${S.malla.sede === s.id ? 'selected' : ''}>${esc(s.nombre)}</option>`).join('')}</select>` : ''}
-      ${esLider() || P().rol === 'supervisor' ? `<button class="btn ghost sm" type="button" data-accion="copiarSemana">Copiar la semana anterior</button>` : ''}</span></div>
-    <div class="card tablewrap"><table><thead><tr><th>Persona</th>${DIAS.map((d, i) => { const f = sumarDias(lunes, i); return `<th class="${f === hoy ? 'today' : ''}">${d} ${f.slice(8)}${f === hoy ? ' · hoy' : ''}</th>`; }).join('')}</tr></thead>
+    return `<td class="${f === hoy ? 'today' : ''}">${celdaTurno({ clave: `m|${x.id}|${f}`, t, edita: editaMalla(x.sede_id), cambio: r && r.cambio,
+      opciones: S.turnos.filter(y => y.sede_id === x.sede_id && y.activo), vacio: tieneFijo ? (r && r.cambio ? '↺ Volver al horario fijo' : '—') : '—' })}</td>`;
+  }).join('')}</tr>`;
+  const filas = porArea(gente, fila, 7);
+  return `<div class="weeknav" style="margin-bottom:14px"><button class="btn ghost sm" type="button" data-semana="-7">‹ Anterior</button><b>${esc(fechaCorta(lunes))} – ${esc(fechaCorta(sumarDias(lunes, 5)))}</b><button class="btn ghost sm" type="button" data-semana="7">Siguiente ›</button>
+      ${lunes !== lunesDe(hoy) ? '<button class="btn ghost sm" type="button" data-semana="0">Esta semana</button>' : ''}</div>
+    <div class="card tablewrap"><table class="malla"><thead><tr><th>Persona</th>${DIAS.map((d, i) => { const f = sumarDias(lunes, i); return `<th class="${f === hoy ? 'today' : ''}">${d} ${Number(f.slice(8))}</th>`; }).join('')}</tr></thead>
       <tbody>${filas || '<tr><td colspan="7" class="vacio">No hay personas en esta sede todavía.</td></tr>'}</tbody></table></div>
-    <p class="hint" style="margin:8px 0 0">La malla se llena sola con el horario fijo de cada persona. Las celdas con borde verde son <b>cambios puntuales</b> de ese día; para quitarlos elige "Volver al horario fijo".</p>
-    ${esLider() || P().rol === 'supervisor' ? horarioFijoView() + turnosView() : ''}`;
+    ${leyendaTurnos(usados)}
+    ${editaMalla(P().sede_id) || P().rol === 'supervisor' ? '<p class="hint" style="margin:6px 0 0">Las celdas con borde verde son cambios puntuales de ese día. Para quitarlos, tócalas y elige "Volver al horario fijo".</p>' : ''}`;
 }
 function horarioFijoView() {
-  const gente = S.personas.filter(x => x.activo && editaMalla(x.sede_id) && (S.malla.sede === 0 || x.sede_id === S.malla.sede));
-  const celda = (x, d) => {
-    const b = S.malla.base.find(y => y.persona_id === x.id && y.dia === d), ops = S.turnos.filter(y => y.sede_id === x.sede_id && y.activo && y.entrada);
-    return `<td><select class="shift ${b ? claseTurno(turno(b.turno_id)) : 't-none'}" data-base="${x.id}|${d}" aria-label="Horario fijo de ${esc(x.nombre)} el ${DIAS[d - 1]}">
-      <option value="">Descanso</option>${ops.map(o => `<option value="${o.id}" ${b && b.turno_id === o.id ? 'selected' : ''}>${esc(turnoEtq(o))}</option>`).join('')}</select>${b ? turnoPie(turno(b.turno_id)) : ''}</td>`;
-  };
-  return `<section style="margin-top:32px"><div class="sec-h"><h2>Horario fijo de cada persona</h2><span class="hint">Se llena una vez; la malla de todas las semanas sale de aquí</span></div>
-    <div class="card tablewrap"><table class="fijo"><thead><tr><th>Persona</th>${DIAS.map(d => `<th>${d}</th>`).join('')}</tr></thead><tbody>
-      ${gente.map(x => `<tr><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(area(x.area_id).nombre)}</small></div></div></td>${[1, 2, 3, 4, 5, 6].map(d => celda(x, d)).join('')}</tr>`).join('') || '<tr><td colspan="7" class="vacio">No hay personas.</td></tr>'}
-    </tbody></table></div></section>`;
+  const gente = S.personas.filter(x => x.activo && editaMalla(x.sede_id) && (S.malla.sede === 0 || x.sede_id === S.malla.sede)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const usados = [];
+  const fila = x => `<tr>${personaTd(x)}${[1, 2, 3, 4, 5, 6].map(d => {
+    const b = S.malla.base.find(y => y.persona_id === x.id && y.dia === d), t = b ? turno(b.turno_id) : null;
+    if (t) usados.push(t.id);
+    return `<td>${celdaTurno({ clave: `b|${x.id}|${d}`, t: t || (S.malla.base.some(y => y.persona_id === x.id) ? { nombre: 'Descanso', codigo: 'D' } : null), edita: true,
+      opciones: S.turnos.filter(y => y.sede_id === x.sede_id && y.activo && y.entrada), vacio: 'Descanso' })}</td>`;
+  }).join('')}</tr>`;
+  return `<div class="card tablewrap"><table class="malla"><thead><tr><th>Persona</th>${DIAS.map(d => `<th>${d}</th>`).join('')}</tr></thead>
+    <tbody>${porArea(gente, fila, 7) || '<tr><td colspan="7" class="vacio">No hay personas.</td></tr>'}</tbody></table></div>${leyendaTurnos(usados)}`;
 }
 function turnosView() {
   const sedesEd = S.sedes.filter(s => editaMalla(s.id));
@@ -1119,7 +1158,14 @@ document.addEventListener('click', async e => {
     if (error) { ocupado(b, false); toast(errorTexto(error)); return; }
     await cargarInicio(); render(); toast(`${PASOS.find(p => p.k === b.dataset.marcar).lbl} registrada a las ${horaEn(miTz())}.`); return;
   }
-  if (b.dataset.semana) { S.malla.lunes = sumarDias(S.malla.lunes, Number(b.dataset.semana)); await cargarMalla(); render(); return; }
+  if (b.dataset.semana) { S.malla.lunes = b.dataset.semana === '0' ? lunesDe(fechaEn(miTz())) : sumarDias(S.malla.lunes, Number(b.dataset.semana)); S.malla.edit = null; await cargarMalla(); render(); return; }
+  if (b.dataset.mvista) { S.malla.vista = b.dataset.mvista; S.malla.edit = null; render(); return; }
+  if (b.dataset.editar) {
+    S.malla.edit = b.dataset.editar; render();
+    const sel = document.querySelector(`select[data-celda="${b.dataset.editar}"]`);
+    if (sel) { sel.focus(); try { sel.showPicker(); } catch (_) {} }
+    return;
+  }
   if (a === 'agregarTurno') {
     // Nueva franja con código numérico consecutivo por sede (1, 2, 3…) y un horario base que luego se ajusta.
     const sid = S.turnoSede, nums = S.turnos.filter(t => t.sede_id === sid && /^\d+$/.test(t.codigo)).map(t => Number(t.codigo));
@@ -1165,9 +1211,28 @@ document.addEventListener('click', async e => {
   }
 });
 
+// Si se abre una celda y se sale sin elegir, vuelve a mostrarse como chip.
+document.addEventListener('focusout', e => {
+  const el = e.target; if (!el.dataset || !el.dataset.celda) return;
+  setTimeout(() => { if (S.malla.edit === el.dataset.celda && !S.malla.guardando && !document.querySelector(`select[data-celda="${el.dataset.celda}"]:focus`)) { S.malla.edit = null; render(); } }, 200);
+});
 document.addEventListener('change', async e => {
   const el = e.target;
   try {
+    if (el.dataset.celda) {
+      const [tipo, pid, k] = el.dataset.celda.split('|'), v = el.value;
+      S.malla.guardando = true;
+      if (tipo === 'm') {
+        if (v) await q(sb.from('malla').upsert({ persona_id: pid, fecha: k, turno_id: Number(v) }, { onConflict: 'persona_id,fecha' }));
+        else await q(sb.from('malla').delete().eq('persona_id', pid).eq('fecha', k));
+      } else {
+        if (v) await q(sb.from('horario_base').upsert({ persona_id: pid, dia: Number(k), turno_id: Number(v) }, { onConflict: 'persona_id,dia' }));
+        else await q(sb.from('horario_base').delete().eq('persona_id', pid).eq('dia', Number(k)));
+      }
+      S.malla.edit = null; S.malla.guardando = false;
+      await cargarMalla(); render();
+      toast(tipo === 'm' ? (v ? 'Cambio guardado para ese día.' : 'Ese día vuelve al horario fijo.') : 'Horario fijo guardado. La malla ya lo usa.'); return;
+    }
     if (el.dataset.base) {
       const [pid, dia] = el.dataset.base.split('|');
       if (el.value) await q(sb.from('horario_base').upsert({ persona_id: pid, dia: Number(dia), turno_id: Number(el.value) }, { onConflict: 'persona_id,dia' }));
@@ -1252,7 +1317,7 @@ document.addEventListener('mousemove', e => {
   tip.style.left = x + 'px'; tip.style.top = (e.clientY - box.top + 14) + 'px';
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && (S.menu || S.lb)) { S.menu = false; S.lb = null; render(); }
+  if (e.key === 'Escape' && (S.menu || S.lb || S.malla.edit)) { S.menu = false; S.lb = null; S.malla.edit = null; render(); }
   if (S.lb && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { const n = S.lb.items.length; S.lb.i = (S.lb.i + (e.key === 'ArrowRight' ? 1 : -1) + n) % n; render(); }
 });
 
