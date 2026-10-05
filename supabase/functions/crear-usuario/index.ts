@@ -1,6 +1,6 @@
 // Intranet Wakanda Travel · administración de cuentas
 // Crea cuentas, restablece contraseñas y desactiva personas. La usa la administración (es_admin) y quien
-// tenga el permiso gestiona_cuentas; este último solo puede crear y tocar cuentas de colaboradores.
+// tenga el rol Supervisor; este último solo puede crear y tocar cuentas de colaboradores.
 // Corre en Supabase (Edge Functions) porque necesita la llave de servicio, que nunca va en la página.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -34,9 +34,9 @@ Deno.serve(async (req) => {
   const alcance = async (id: string) => {
     if (esAdmin) return null;
     if (id === yo.user.id) return "No puedes cambiar tu propia cuenta desde aquí.";
-    const { data: p } = await admin.from("perfiles").select("rol,es_admin,gestiona_cuentas").eq("id", id).maybeSingle();
+    const { data: p } = await admin.from("perfiles").select("rol,es_admin").eq("id", id).maybeSingle();
     if (!p) return "La persona no existe.";
-    if (p.rol !== "colaborador" || p.es_admin || p.gestiona_cuentas) return "Solo la administración puede cambiar la cuenta de esta persona.";
+    if (p.rol !== "colaborador" || p.es_admin) return "Solo la administración puede cambiar la cuenta de esta persona.";
     return null;
   };
   let datos: Record<string, unknown>;
@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
       const { correo, nombre, sede_id, area_id, rol, contrasena } = datos as Record<string, string>;
       if (!correo || !nombre || !sede_id) return responder({ error: "Faltan correo, nombre o sede." }, 400);
       if (!contrasenaValida(contrasena)) return responder({ error: "La contraseña temporal debe tener al menos 8 caracteres." }, 400);
-      if (!esAdmin && (rol ?? "colaborador") !== "colaborador") return responder({ error: "Solo la administración puede crear cuentas de directoras o gerentes." }, 403);
+      if (!esAdmin && (rol ?? "colaborador") !== "colaborador") return responder({ error: "Solo la administración puede crear cuentas de supervisores, directoras o gerentes." }, 403);
       const { data: u, error } = await admin.auth.admin.createUser({
         email: String(correo).trim().toLowerCase(),
         password: contrasena,
