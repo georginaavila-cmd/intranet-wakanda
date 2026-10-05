@@ -79,6 +79,8 @@ const ROLES = { colaborador: 'Colaborador', supervisor: 'Supervisor', directora:
 const gestionaCuentas = () => !!(P().es_admin || P().rol === 'supervisor');
 // Quien gestiona cuentas sin ser administración solo toca colaboradores comunes, y nunca su propia cuenta.
 const puedeTocarCuenta = x => x.id !== P().id && (P().es_admin || (x.rol === 'colaborador' && !x.es_admin));
+// La malla la editan quienes lideran la sede y, además, los supervisores (en todas las sedes).
+const editaMalla = sedeId => lideraSede(sedeId) || P().rol === 'supervisor';
 const esLider = () => esGerencia() || P().rol === 'directora';
 const lideraSede = sedeId => esGerencia() || (P().rol === 'directora' && P().sede_id === sedeId);
 const sede = id => S.sedes.find(s => s.id === id) || { nombre: '—', zona_horaria: 'America/Bogota' };
@@ -242,7 +244,7 @@ function guiaView() {
       <li>Si tienes vacaciones, permiso o incapacidad aprobados, verás <b>Hoy no tienes que marcar</b> y el día queda justificado.</li></ul>
       <p><b>¿Se te olvidó marcar o marcaste mal?</b> Escríbele a tu líder el mismo día con la hora real.</p>` },
     { id: 'g-equipo', t: 'Malla, comunicados y herramientas', html: `
-      <p><b>Malla.</b> En <b>Malla</b> ves los turnos de tu sede semana a semana. Solo las líderes la cambian, y cualquier cambio se refleja de inmediato.</p>
+      <p><b>Malla.</b> En <b>Malla</b> ves los turnos de tu sede semana a semana. Solo las líderes y los supervisores la cambian, y cualquier cambio se refleja de inmediato.</p>
       <p><b>Comunicados.</b> El número rojo en <b>Comunicados</b> indica cuántos tienes sin confirmar. Léelos y toca <b>Confirmar lectura</b>: la gerencia ve quién ya los leyó. Las imágenes se abren en grande al tocarlas y el buscador encuentra comunicados por palabra.</p>
       <p><b>Herramientas.</b> Desde <b>Inicio</b> abres OMNIAXIS, Wakanda Documentos y KAM 360.</p>` },
     { id: 'g-sol', t: 'Vacaciones, permisos e incapacidades', si: moduloSol() || esGerencia(), html: `
@@ -263,12 +265,13 @@ function guiaView() {
       <li><b>Rol Supervisor:</b> asígnalo a quien deba crear y administrar cuentas de colaboradores (por ejemplo, contabilidad). No le da acceso a informes, aprobaciones ni configuración.</li></ul>` : ''}
       <p><b>Solicitudes.</b> En <b>Solicitudes</b> activas o apagas el módulo para todo el equipo y asignas los <b>revisores</b>: quién puede ver, aprobar y rechazar, por sede y por tipo (por ejemplo, contabilidad para incapacidades). Las directoras solo revisan si las asignas. Nadie aprueba sus propias solicitudes.</p>
       <p><b>Informes.</b> Ves ambas sedes o una sola, con los indicadores del mes, la gráfica por día, el ranking de llegadas tarde y la confirmación de comunicados.</p>` },
-    { id: 'g-cuentas', t: 'Para supervisores: cuentas del equipo', si: P().rol === 'supervisor' && !P().es_admin, html: `
+    { id: 'g-cuentas', t: 'Para supervisores: cuentas y malla', si: P().rol === 'supervisor' && !P().es_admin, html: `
       <p>Como supervisor manejas las cuentas de los colaboradores desde la pestaña <b>Equipo</b>.</p>
       <ul><li><b>Crear:</b> nombre, correo corporativo, sede y área. La contraseña temporal se muestra <b>una sola vez</b>: cópiala y entrégala en privado. La persona la cambia al primer ingreso.</li>
       <li><b>Nueva contraseña:</b> para quien la olvidó.</li>
       <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li>
       <li>También puedes cambiar la sede y el área de los colaboradores.</li></ul>
+      <p><b>Malla de horarios.</b> En <b>Malla</b> puedes asignar el turno de cada persona, en todas las sedes, y usar <b>Copiar la semana anterior</b>. Los horarios de cada turno los ajustan las directoras.</p>
       <p>Las cuentas de directoras, gerentes, administración y la tuya propia solo las cambia la administración.</p>` },
     { id: 'g-faq', t: 'Preguntas frecuentes', html: `
       <p><b>Olvidé mi contraseña.</b> Pídele a la gerencia que la restablezca; recibirás una temporal.</p>
@@ -374,7 +377,7 @@ function semanaView() {
 /* ── Malla de horarios ── */
 async function cargarMalla() {
   if (!S.malla.lunes) S.malla.lunes = lunesDe(fechaEn(miTz()));
-  if (S.malla.sede == null) S.malla.sede = esGerencia() ? 0 : P().sede_id;
+  if (S.malla.sede == null) S.malla.sede = esGerencia() || P().rol === 'supervisor' ? 0 : P().sede_id;
   S.malla.filas = await q(sb.from('malla').select('persona_id,fecha,turno_id').gte('fecha', S.malla.lunes).lte('fecha', sumarDias(S.malla.lunes, 5)));
   if (esLider() && !S.turnoSede) S.turnoSede = esGerencia() ? S.sedes[0]?.id : P().sede_id;
 }
@@ -383,18 +386,19 @@ function mallaView() {
   const gente = S.personas.filter(x => x.activo && (S.malla.sede === 0 || x.sede_id === S.malla.sede));
   const celda = (x, i) => {
     const f = sumarDias(lunes, i), r = S.malla.filas.find(y => y.persona_id === x.id && y.fecha === f), t = r ? turno(r.turno_id) : null;
-    if (!lideraSede(x.sede_id)) return `<td class="${f === hoy ? 'today' : ''}"><span class="shift ${claseTurno(t)}">${t ? esc(t.nombre) : '—'}</span></td>`;
+    if (!editaMalla(x.sede_id)) return `<td class="${f === hoy ? 'today' : ''}"><span class="shift ${claseTurno(t)}">${t ? esc(t.nombre) : '—'}</span></td>`;
     const ops = S.turnos.filter(y => y.sede_id === x.sede_id && y.activo);
     return `<td class="${f === hoy ? 'today' : ''}"><select class="shift ${claseTurno(t)}" data-malla="${x.id}|${f}" aria-label="Turno de ${esc(x.nombre)} el ${DIAS[i]}">
       <option value="">—</option>${ops.map(o => `<option value="${o.id}" ${t && t.id === o.id ? 'selected' : ''}>${esc(o.nombre)}</option>`).join('')}</select></td>`;
   };
   const filas = gente.map(x => `<tr><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(area(x.area_id).nombre)} · ${esc(sede(x.sede_id).nombre)}</small></div></div></td>${DIAS.map((_, i) => celda(x, i)).join('')}</tr>`).join('');
-  const ayuda = !esLider() ? 'La malla es pública: todo el equipo la ve. Solo la directora de cada sede y la gerencia pueden cambiarla.'
+  const ayuda = P().rol === 'supervisor' ? 'Como supervisor puedes cambiar la malla de todas las sedes. Cada cambio queda guardado en el historial.'
+    : !esLider() ? 'La malla es pública: todo el equipo la ve. Solo la directora de cada sede, la gerencia y los supervisores pueden cambiarla.'
     : esGerencia() ? 'Puedes cambiar los turnos de las dos sedes. Cada cambio queda guardado en el historial.' : `Puedes cambiar los turnos de la sede ${esc(sede(P().sede_id).nombre)}. Cada cambio queda guardado en el historial.`;
   return `<div class="hello"><div><div class="eyebrow">Intranet · semana del ${esc(fechaCorta(lunes))}</div><h1>Malla de <em>horarios</em></h1><p>${ayuda}</p></div></div>
     <div class="toolbar"><div class="weeknav"><button class="btn ghost sm" type="button" data-semana="-7">Semana anterior</button><b>${esc(fechaCorta(lunes))} – ${esc(fechaCorta(sumarDias(lunes, 5)))}</b><button class="btn ghost sm" type="button" data-semana="7">Semana siguiente</button></div>
       <span style="display:flex;gap:8px;flex-wrap:wrap">${S.sedes.length > 1 ? `<select id="mSede" aria-label="Sede"><option value="0" ${S.malla.sede === 0 ? 'selected' : ''}>Las dos sedes</option>${S.sedes.map(s => `<option value="${s.id}" ${S.malla.sede === s.id ? 'selected' : ''}>${esc(s.nombre)}</option>`).join('')}</select>` : ''}
-      ${esLider() ? `<button class="btn ghost sm" type="button" data-accion="copiarSemana">Copiar la semana anterior</button>` : ''}</span></div>
+      ${esLider() || P().rol === 'supervisor' ? `<button class="btn ghost sm" type="button" data-accion="copiarSemana">Copiar la semana anterior</button>` : ''}</span></div>
     <div class="card tablewrap"><table><thead><tr><th>Persona</th>${DIAS.map((d, i) => { const f = sumarDias(lunes, i); return `<th class="${f === hoy ? 'today' : ''}">${d} ${f.slice(8)}${f === hoy ? ' · hoy' : ''}</th>`; }).join('')}</tr></thead>
       <tbody>${filas || '<tr><td colspan="7" class="vacio">No hay personas en esta sede todavía.</td></tr>'}</tbody></table></div>
     ${esLider() ? turnosView() : ''}`;
@@ -1076,7 +1080,7 @@ document.addEventListener('click', async e => {
     const ant = sumarDias(S.malla.lunes, -7);
     try {
       const prev = await q(sb.from('malla').select('persona_id,fecha,turno_id').gte('fecha', ant).lte('fecha', sumarDias(ant, 5)));
-      const filas = prev.filter(r => { const x = persona(r.persona_id); return x && x.activo && lideraSede(x.sede_id) && (S.malla.sede === 0 || x.sede_id === S.malla.sede); })
+      const filas = prev.filter(r => { const x = persona(r.persona_id); return x && x.activo && editaMalla(x.sede_id) && (S.malla.sede === 0 || x.sede_id === S.malla.sede); })
         .map(r => ({ persona_id: r.persona_id, fecha: sumarDias(r.fecha, 7), turno_id: r.turno_id }));
       if (!filas.length) { toast('La semana anterior no tiene turnos para copiar.'); return; }
       await q(sb.from('malla').upsert(filas, { onConflict: 'persona_id,fecha' }));
