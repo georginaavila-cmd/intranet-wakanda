@@ -73,7 +73,7 @@ const S = {
   sedes: [], areas: [], turnos: [], herramientas: [], personas: [], config: {},
   view: 'inicio', menu: false,
   hoy: { malla: null, marcas: [], semana: [] },
-  malla: { lunes: null, sede: null, filas: [] },
+  malla: { lunes: null, sede: null, filas: [], base: [] },
   turnoSede: null,
   asistencia: { filas: [] },
   equipo: { claveNueva: null, filtro: '' },
@@ -109,6 +109,10 @@ const persona = id => S.personas.find(p => p.id === id);
 const miTz = () => sede(P().sede_id).zona_horaria;
 const puedePublicar = () => esLider();
 const tol = () => ({ entrada: 5, almuerzo: 5, ...(S.config.tolerancias ? { entrada: S.config.tolerancias.entrada_min, almuerzo: S.config.tolerancias.almuerzo_min } : {}) });
+const hm = t => t ? String(Number(t.slice(0, 2))) + t.slice(2, 5) : '';
+// Etiqueta de un turno con sus horas, para elegirlo sin tener que recordar qué es "Turno 7".
+const turnoEtq = t => !t ? '' : t.entrada ? `${hm(t.entrada)}–${hm(t.salida)} · ${t.nombre}${t.salida_almuerzo ? ` · alm ${hm(t.salida_almuerzo)}` : ''}` : t.nombre;
+const turnoPie = t => !t || !t.entrada ? '' : `<small class="num">${esc(t.nombre)}${t.salida_almuerzo ? ` · alm ${hm(t.salida_almuerzo)}` : ' · sin almuerzo'}</small>`;
 const claseTurno = t => !t ? 't-none' : ['M', 'T', 'S', 'D', 'V'].includes(t.codigo) ? `t-${t.codigo}` : (t.entrada ? 't-X' : 't-D');
 
 /* ── Utilidades de interfaz ── */
@@ -130,6 +134,8 @@ const errorTexto = e => {
 };
 async function q(promesa) { const { data, error } = await promesa; if (error) throw error; return data; }
 // Trae todas las filas de una consulta, de 1.000 en 1.000 (Supabase entrega máximo 1.000 por vez).
+// Malla efectiva: el cambio puntual del día si existe; si no, el horario fijo de la persona (función malla_efectiva).
+async function mallaEfectiva(desde, hasta) { return todas(() => sb.rpc('malla_efectiva', { p_desde: desde, p_hasta: hasta }).order('fecha').order('persona_id')); }
 async function todas(armar) { const out = []; for (let i = 0; ; i += 1000) { const d = await q(armar().range(i, i + 999)); out.push(...d); if (d.length < 1000) return out; } }
 function render() { document.getElementById('app').innerHTML = vista(); }
 function vista() {
@@ -308,12 +314,12 @@ function guiaView() {
 /* ── Inicio: pase de jornada ── */
 async function cargarInicio() {
   const tz = miTz(), hoy = fechaEn(tz), lunes = lunesDe(hoy);
-  const [mallaHoy, marcas, semana] = await Promise.all([
-    q(sb.from('malla').select('turno_id').eq('persona_id', P().id).eq('fecha', hoy).maybeSingle()),
-    q(sb.from('marcas').select('tipo,hora').eq('persona_id', P().id).eq('fecha', hoy)),
-    q(sb.from('malla').select('fecha,turno_id').eq('persona_id', P().id).gte('fecha', lunes).lte('fecha', sumarDias(lunes, 5)))
+  const [efectiva, marcas] = await Promise.all([
+    mallaEfectiva(lunes, sumarDias(lunes, 6)),
+    q(sb.from('marcas').select('tipo,hora').eq('persona_id', P().id).eq('fecha', hoy))
   ]);
-  S.hoy = { fecha: hoy, malla: mallaHoy, marcas, semana, lunes };
+  const semana = efectiva.filter(r => r.persona_id === P().id);
+  S.hoy = { fecha: hoy, malla: semana.find(r => r.fecha === hoy) || null, marcas, semana, lunes };
   await Promise.all([cargarComunicados(), cargarSolicitudes()]);
 }
 function evaluar(paso, realMin, t, marcas) {
@@ -397,7 +403,10 @@ function semanaView() {
 async function cargarMalla() {
   if (!S.malla.lunes) S.malla.lunes = lunesDe(fechaEn(miTz()));
   if (S.malla.sede == null) S.malla.sede = esGerencia() || P().rol === 'supervisor' ? 0 : P().sede_id;
-  S.malla.filas = await q(sb.from('malla').select('persona_id,fecha,turno_id').gte('fecha', S.malla.lunes).lte('fecha', sumarDias(S.malla.lunes, 5)));
+  [S.malla.filas, S.malla.base] = await Promise.all([
+    mallaEfectiva(S.malla.lunes, sumarDias(S.malla.lunes, 5)),
+    q(sb.from('horario_base').select('persona_id,dia,turno_id'))
+  ]);
   if ((esLider() || P().rol === 'supervisor') && !S.turnoSede) S.turnoSede = esGerencia() || P().rol === 'supervisor' ? S.sedes[0]?.id : P().sede_id;
 }
 function mallaView() {
@@ -405,10 +414,12 @@ function mallaView() {
   const gente = S.personas.filter(x => x.activo && (S.malla.sede === 0 || x.sede_id === S.malla.sede));
   const celda = (x, i) => {
     const f = sumarDias(lunes, i), r = S.malla.filas.find(y => y.persona_id === x.id && y.fecha === f), t = r ? turno(r.turno_id) : null;
-    if (!editaMalla(x.sede_id)) return `<td class="${f === hoy ? 'today' : ''}"><span class="shift ${claseTurno(t)}">${t ? esc(t.nombre) : '—'}</span></td>`;
+    const cls = `${f === hoy ? 'today' : ''} ${r && r.cambio ? 'cambio' : ''}`, horas = turnoPie(t);
+    if (!editaMalla(x.sede_id)) return `<td class="${cls}"><span class="shift ${claseTurno(t)}">${t ? esc(t.entrada ? `${hm(t.entrada)}–${hm(t.salida)}` : t.nombre) : '—'}</span>${horas}</td>`;
     const ops = S.turnos.filter(y => y.sede_id === x.sede_id && y.activo);
-    return `<td class="${f === hoy ? 'today' : ''}"><select class="shift ${claseTurno(t)}" data-malla="${x.id}|${f}" aria-label="Turno de ${esc(x.nombre)} el ${DIAS[i]}">
-      <option value="">—</option>${ops.map(o => `<option value="${o.id}" ${t && t.id === o.id ? 'selected' : ''}>${esc(o.nombre)}</option>`).join('')}</select></td>`;
+    const tieneFijo = S.malla.base.some(b => b.persona_id === x.id);
+    return `<td class="${cls}"><select class="shift ${claseTurno(t)}" data-malla="${x.id}|${f}" aria-label="Turno de ${esc(x.nombre)} el ${DIAS[i]}" title="${r && r.cambio ? 'Cambio puntual de este día' : tieneFijo ? 'Según el horario fijo' : ''}">
+      <option value="">${tieneFijo ? (r && r.cambio ? '↺ Volver al horario fijo' : '—') : '—'}</option>${ops.map(o => `<option value="${o.id}" ${t && t.id === o.id ? 'selected' : ''}>${esc(turnoEtq(o))}</option>`).join('')}</select>${horas}</td>`;
   };
   const filas = gente.map(x => `<tr><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(area(x.area_id).nombre)} · ${esc(sede(x.sede_id).nombre)}</small></div></div></td>${DIAS.map((_, i) => celda(x, i)).join('')}</tr>`).join('');
   const ayuda = P().rol === 'supervisor' ? 'Como supervisor puedes cambiar la malla y los turnos de todas las sedes. Cada cambio queda guardado en el historial.'
@@ -420,11 +431,24 @@ function mallaView() {
       ${esLider() || P().rol === 'supervisor' ? `<button class="btn ghost sm" type="button" data-accion="copiarSemana">Copiar la semana anterior</button>` : ''}</span></div>
     <div class="card tablewrap"><table><thead><tr><th>Persona</th>${DIAS.map((d, i) => { const f = sumarDias(lunes, i); return `<th class="${f === hoy ? 'today' : ''}">${d} ${f.slice(8)}${f === hoy ? ' · hoy' : ''}</th>`; }).join('')}</tr></thead>
       <tbody>${filas || '<tr><td colspan="7" class="vacio">No hay personas en esta sede todavía.</td></tr>'}</tbody></table></div>
-    ${esLider() || P().rol === 'supervisor' ? turnosView() : ''}`;
+    <p class="hint" style="margin:8px 0 0">La malla se llena sola con el horario fijo de cada persona. Las celdas con borde verde son <b>cambios puntuales</b> de ese día; para quitarlos elige "Volver al horario fijo".</p>
+    ${esLider() || P().rol === 'supervisor' ? horarioFijoView() + turnosView() : ''}`;
+}
+function horarioFijoView() {
+  const gente = S.personas.filter(x => x.activo && editaMalla(x.sede_id) && (S.malla.sede === 0 || x.sede_id === S.malla.sede));
+  const celda = (x, d) => {
+    const b = S.malla.base.find(y => y.persona_id === x.id && y.dia === d), ops = S.turnos.filter(y => y.sede_id === x.sede_id && y.activo && y.entrada);
+    return `<td><select class="shift ${b ? claseTurno(turno(b.turno_id)) : 't-none'}" data-base="${x.id}|${d}" aria-label="Horario fijo de ${esc(x.nombre)} el ${DIAS[d - 1]}">
+      <option value="">Descanso</option>${ops.map(o => `<option value="${o.id}" ${b && b.turno_id === o.id ? 'selected' : ''}>${esc(turnoEtq(o))}</option>`).join('')}</select>${b ? turnoPie(turno(b.turno_id)) : ''}</td>`;
+  };
+  return `<section style="margin-top:32px"><div class="sec-h"><h2>Horario fijo de cada persona</h2><span class="hint">Se llena una vez; la malla de todas las semanas sale de aquí</span></div>
+    <div class="card tablewrap"><table class="fijo"><thead><tr><th>Persona</th>${DIAS.map(d => `<th>${d}</th>`).join('')}</tr></thead><tbody>
+      ${gente.map(x => `<tr><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(area(x.area_id).nombre)}</small></div></div></td>${[1, 2, 3, 4, 5, 6].map(d => celda(x, d)).join('')}</tr>`).join('') || '<tr><td colspan="7" class="vacio">No hay personas.</td></tr>'}
+    </tbody></table></div></section>`;
 }
 function turnosView() {
   const sedesEd = S.sedes.filter(s => editaMalla(s.id));
-  const sid = S.turnoSede, lista = S.turnos.filter(t => t.sede_id === sid);
+  const sid = S.turnoSede, lista = S.turnos.filter(t => t.sede_id === sid && t.activo);
   const inp = (t, f, lbl) => t.entrada == null && f !== 'nombre' ? '<span class="hint">—</span>'
     : f === 'nombre' ? `<input type="text" class="tname" data-turno="${t.id}|nombre" value="${esc(t.nombre)}" aria-label="Nombre del turno ${esc(t.codigo)}">`
     : (f.includes('almuerzo') && t.salida_almuerzo == null) ? '<span class="hint">Sin almuerzo</span>'
@@ -432,7 +456,7 @@ function turnosView() {
   return `<section style="margin-top:32px"><div class="sec-h"><h2>Turnos</h2>
       <span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${sedesEd.length > 1 ? `<select id="tSede" aria-label="Sede de los turnos">${sedesEd.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${esc(s.nombre)}</option>`).join('')}</select>` : ''}
       <button class="btn sm teal" type="button" data-accion="agregarTurno">${ico('plus')} Agregar turno</button></span></div>
-    <div class="notice">${ico('alert')}<div><b>Los turnos iniciales son de ejemplo.</b> Ajusta los nombres y las horas a los horarios reales de la sede ${esc(sede(sid).nombre)}. La malla, el pase de jornada y la asistencia usan estos horarios.</div></div>
+    <div class="notice">${ico('alert')}<div><b>Cada turno es una franja de horario.</b> Si cambias sus horas aquí, cambian para todas las personas que lo tienen en su horario fijo o en la malla de la sede ${esc(sede(sid).nombre)}. Para un horario nuevo, usa <b>Agregar turno</b>.</div></div>
     <div class="card tablewrap"><table class="turnos"><thead><tr><th>Código</th><th>Nombre</th><th>Entrada</th><th>Sale a almorzar</th><th>Regresa</th><th>Salida</th></tr></thead><tbody>
       ${lista.map(t => `<tr><td><span class="chip ${claseTurno(t)}">${esc(t.codigo)}</span></td><td>${inp(t, 'nombre')}</td>
         ${t.entrada == null ? '<td colspan="4" class="hint">Sin horario: no se marca asistencia</td>' : `<td>${inp(t, 'entrada', 'Entrada')}</td><td>${inp(t, 'salida_almuerzo', 'Salida a almuerzo')}</td><td>${inp(t, 'regreso_almuerzo', 'Regreso de almuerzo')}</td><td>${inp(t, 'salida', 'Salida')}</td>`}</tr>`).join('')}
@@ -443,7 +467,7 @@ function turnosView() {
 async function cargarAsistencia() {
   const fechas = [...new Set(S.sedes.map(s => fechaEn(s.zona_horaria)))];
   const [malla, marcas] = await Promise.all([
-    q(sb.from('malla').select('persona_id,fecha,turno_id').in('fecha', fechas)),
+    mallaEfectiva(fechas.slice().sort()[0], fechas.slice().sort().pop()).then(rs => rs.filter(r => fechas.includes(r.fecha))),
     q(sb.from('marcas').select('persona_id,fecha,tipo,hora').in('fecha', fechas))
   ]);
   const desde = fechas.slice().sort()[0], hasta = fechas.slice().sort().pop();
@@ -783,7 +807,7 @@ async function cargarInforme() {
   if (!esGerencia()) S.inf.sede = P().sede_id;
   const [y, m] = S.inf.mes.split('-').map(Number), desde = `${S.inf.mes}-01`, hasta = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
   const [malla, marcas, ausR] = await Promise.all([
-    todas(() => sb.from('malla').select('persona_id,fecha,turno_id').gte('fecha', desde).lte('fecha', hasta).order('fecha')),
+    mallaEfectiva(desde, hasta),
     todas(() => sb.from('marcas').select('persona_id,fecha,tipo,hora').gte('fecha', desde).lte('fecha', hasta).order('fecha')),
     sb.rpc('ausencias_aprobadas', { p_desde: desde, p_hasta: hasta })
   ]);
@@ -1144,6 +1168,12 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', async e => {
   const el = e.target;
   try {
+    if (el.dataset.base) {
+      const [pid, dia] = el.dataset.base.split('|');
+      if (el.value) await q(sb.from('horario_base').upsert({ persona_id: pid, dia: Number(dia), turno_id: Number(el.value) }, { onConflict: 'persona_id,dia' }));
+      else await q(sb.from('horario_base').delete().eq('persona_id', pid).eq('dia', Number(dia)));
+      await cargarMalla(); render(); toast('Horario fijo guardado. La malla ya lo usa.'); return;
+    }
     if (el.dataset.malla) {
       const [pid, fecha] = el.dataset.malla.split('|');
       if (el.value) await q(sb.from('malla').upsert({ persona_id: pid, fecha, turno_id: Number(el.value) }, { onConflict: 'persona_id,fecha' }));

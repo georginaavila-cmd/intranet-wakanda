@@ -11,7 +11,7 @@
       { id: 2, nombre: 'KAM 360', descripcion: 'Equipo comercial.', icono: 'target', pie: 'Comercial', url: 'https://example.com', orden: 2, activo: true }],
     configuracion: [{ clave: 'tolerancias', valor: { entrada_min: 5, almuerzo_min: 5 } }, { clave: 'validar_ip', valor: { activo: false } }, { clave: 'modulo_solicitudes', valor: { activo: false } }],
     perfiles: [{ id: ADMIN, nombre: 'Georgina Ávila', correo: 'georgina.avila@wakanda.travel', sede_id: 1, area_id: 1, rol: 'gerente', es_admin: true, activo: true, acepto_datos: null }],
-    malla: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: []
+    malla: [], horario_base: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: []
   };
   let tid = 1;
   for (const s of [1, 2]) for (const [c, n, e, a, r, sa] of [['M', 'Mañana', '08:00:00', '12:30:00', '13:30:00', '17:30:00'], ['T', 'Tarde', '10:00:00', '14:00:00', '15:00:00', '19:00:00'], ['S', 'Sábado', '09:00:00', null, null, '13:00:00'], ['D', 'Descanso', null, null, null, null]])
@@ -37,6 +37,7 @@
       DB.marcas.push({ persona_id: id, fecha: iso(d), tipo: 'salida', hora: hm(t.salida, azar() < .1 ? -15 : azar() < .2 ? 45 : 5) });
     }
   });
+  DB.perfiles.filter(x => x.id !== ADMIN).forEach(x => { const M = DB.turnos.find(t => t.sede_id === x.sede_id && t.codigo === 'M'), Sa = DB.turnos.find(t => t.sede_id === x.sede_id && t.codigo === 'S'); for (let d = 1; d <= 5; d++) DB.horario_base.push({ persona_id: x.id, dia: d, turno_id: M.id }); DB.horario_base.push({ persona_id: x.id, dia: 6, turno_id: Sa.id }); });
   let sesion = null, meta = { debe_cambiar_contrasena: true };
   class Q {
     constructor(t) { this.t = t; this.f = []; this.op = 'select'; this.one = false; }
@@ -47,14 +48,14 @@
     gte(c, v) { this.f.push(r => r[c] >= v); return this; } lte(c, v) { this.f.push(r => r[c] <= v); return this; }
     in(c, vs) { this.f.push(r => vs.includes(r[c])); return this; }
     maybeSingle() { this.one = true; return this; }
-    upsert(v) { this.op = 'upsert'; this.v = [].concat(v); return this; }
+    upsert(v, o) { this.op = 'upsert'; this.v = [].concat(v); this.k = ((o && o.onConflict) || 'persona_id,fecha').split(','); return this; }
     update(v) { this.op = 'update'; this.v = v; return this; }
     delete() { this.op = 'delete'; return this; }
     then(ok, ko) { return Promise.resolve(this.run()).then(ok, ko); }
     run() {
       const T = DB[this.t], m = r => this.f.every(f => f(r));
       if (this.op === 'insert') { const out = this.v.map(v => { const r = { id: (T.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1), creado: new Date().toISOString(), ...(this.t === 'solicitudes' ? { estado: 'pendiente' } : {}), ...v }; T.push(r); return r; }); return { data: this.one ? out[0] : out, error: null }; }
-      if (this.op === 'upsert') { for (const v of this.v) { const i = T.findIndex(r => r.persona_id === v.persona_id && r.fecha === v.fecha); if (i >= 0) T[i] = { ...T[i], ...v }; else T.push(v); } return { data: null, error: null }; }
+      if (this.op === 'upsert') { for (const v of this.v) { const i = T.findIndex(r => this.k.every(k => String(r[k]) === String(v[k]))); if (i >= 0) T[i] = { ...T[i], ...v }; else T.push(v); } return { data: null, error: null }; }
       if (this.op === 'update') { T.filter(m).forEach(r => Object.assign(r, this.v)); return { data: null, error: null }; }
       if (this.op === 'delete') { DB[this.t] = T.filter(r => !m(r)); return { data: null, error: null }; }
       const rows = T.filter(m).map(r => ({ ...r }));
@@ -62,6 +63,32 @@
       return { data: this.one ? (out[0] || null) : out, error: null };
     }
   }
+  // Igual que la función SQL malla_efectiva: el cambio puntual o, si no hay, el horario fijo (Descanso si el día no tiene).
+  const mallaEf = args => {
+    const out = DB.malla.filter(m => m.fecha >= args.p_desde && m.fecha <= args.p_hasta).map(m => ({ ...m, cambio: true }));
+    const inicio = hoyTz('America/Bogota');
+    for (let f = args.p_desde; f <= args.p_hasta; f = new Date(Date.parse(f + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10)) {
+      if (f < inicio) continue;
+      const dow = new Date(f + 'T12:00:00Z').getUTCDay() || 7;
+      for (const p of DB.perfiles.filter(x => x.activo && DB.horario_base.some(b => b.persona_id === x.id))) {
+        if (out.some(o => o.persona_id === p.id && o.fecha === f)) continue;
+        const b = DB.horario_base.find(y => y.persona_id === p.id && y.dia === dow), d = DB.turnos.find(t => t.sede_id === p.sede_id && t.codigo === 'D');
+        const tid = b ? b.turno_id : d && d.id; if (tid) out.push({ persona_id: p.id, fecha: f, turno_id: tid, cambio: false });
+      }
+    }
+    DB.__me = out; return new Q('__me');
+  };
+  const rpcAsync = async (fn, args) => {
+      if (fn === 'aceptar_datos') { DB.perfiles.find(x => x.id === actual).acepto_datos = new Date().toISOString(); return { error: null }; }
+      if (fn === 'marcar') {
+        const f = hoyTz('America/Bogota');
+        if (DB.marcas.some(x => x.persona_id === ADMIN && x.fecha === f && x.tipo === args.p_tipo)) return { error: { message: 'ERROR: Ya marcaste entrada hoy.' } };
+        DB.marcas.push({ persona_id: ADMIN, fecha: f, tipo: args.p_tipo, hora: new Date(Date.now() - 3600e3 * (4 - DB.marcas.length)).toISOString() }); return { data: {}, error: null };
+      }
+      if (fn === 'revisar_solicitud') { const x = DB.solicitudes.find(y => y.id === args.p_id); if (x.persona_id === actual) return { error: { message: 'ERROR: No puedes revisar tus propias solicitudes.' } }; Object.assign(x, { estado: args.p_aprobar ? 'aprobada' : 'rechazada', revisado_por: actual, comentario: args.p_comentario }); return { data: x, error: null }; }
+      if (fn === 'ausencias_aprobadas') return { data: DB.solicitudes.filter(x => x.estado === 'aprobada' && !x.hora_desde && x.desde <= args.p_hasta && x.hasta >= args.p_desde), error: null };
+      return { error: { message: 'rpc desconocida' } };
+  };
   let actual = ADMIN;
   const user = () => { const p = DB.perfiles.find(x => x.id === actual); return { id: actual, email: p.correo, user_metadata: actual === ADMIN ? meta : {} }; };
   window.supabase = { createClient: () => ({
@@ -73,17 +100,7 @@
       signOut: async () => { sesion = null; return {}; },
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } })
     },
-    rpc: async (fn, args) => {
-      if (fn === 'aceptar_datos') { DB.perfiles.find(x => x.id === actual).acepto_datos = new Date().toISOString(); return { error: null }; }
-      if (fn === 'marcar') {
-        const f = hoyTz('America/Bogota');
-        if (DB.marcas.some(x => x.persona_id === ADMIN && x.fecha === f && x.tipo === args.p_tipo)) return { error: { message: 'ERROR: Ya marcaste entrada hoy.' } };
-        DB.marcas.push({ persona_id: ADMIN, fecha: f, tipo: args.p_tipo, hora: new Date(Date.now() - 3600e3 * (4 - DB.marcas.length)).toISOString() }); return { data: {}, error: null };
-      }
-      if (fn === 'revisar_solicitud') { const x = DB.solicitudes.find(y => y.id === args.p_id); if (x.persona_id === actual) return { error: { message: 'ERROR: No puedes revisar tus propias solicitudes.' } }; Object.assign(x, { estado: args.p_aprobar ? 'aprobada' : 'rechazada', revisado_por: actual, comentario: args.p_comentario }); return { data: x, error: null }; }
-      if (fn === 'ausencias_aprobadas') return { data: DB.solicitudes.filter(x => x.estado === 'aprobada' && !x.hora_desde && x.desde <= args.p_hasta && x.hasta >= args.p_desde), error: null };
-      return { error: { message: 'rpc desconocida' } };
-    },
+    rpc: (fn, args) => fn === 'malla_efectiva' ? mallaEf(args) : rpcAsync(fn, args),
     storage: { from: () => ({
       upload: async (ruta, file) => { (window.__archivos = window.__archivos || {})[ruta] = URL.createObjectURL(file); return { data: { path: ruta }, error: null }; },
       createSignedUrls: async rutas => ({ data: rutas.map(r => ({ path: r, signedUrl: (window.__archivos || {})[r] })), error: null }),
