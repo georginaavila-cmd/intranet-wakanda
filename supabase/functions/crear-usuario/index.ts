@@ -1,5 +1,6 @@
 // Intranet Wakanda Travel · administración de cuentas
-// Crea cuentas, restablece contraseñas y desactiva personas. Solo la puede usar quien tenga es_admin.
+// Crea cuentas, restablece contraseñas y desactiva personas. La usa la administración (es_admin) y quien
+// tenga el permiso gestiona_cuentas; este último solo puede crear y tocar cuentas de colaboradores.
 // Corre en Supabase (Edge Functions) porque necesita la llave de servicio, que nunca va en la página.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -21,12 +22,23 @@ Deno.serve(async (req) => {
   const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
   const servicio = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-  // 1. ¿Quién llama? Debe ser administradora.
+  // 1. ¿Quién llama? Administración o alguien con permiso para gestionar cuentas.
   const comoUsuario = createClient(url, anon, { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } });
-  const { data: esAdmin, error: errAdmin } = await comoUsuario.rpc("es_admin");
-  if (errAdmin || !esAdmin) return responder({ error: "Solo la administración puede gestionar cuentas." }, 403);
+  const [{ data: puede, error: errPuede }, { data: esAdmin }, { data: yo }] = await Promise.all([
+    comoUsuario.rpc("puede_gestionar_cuentas"), comoUsuario.rpc("es_admin"), comoUsuario.auth.getUser((req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")),
+  ]);
+  if (errPuede || !puede || !yo?.user) return responder({ error: "No tienes permiso para gestionar cuentas." }, 403);
 
   const admin = createClient(url, servicio, { auth: { persistSession: false } });
+  // Quien no es administración solo toca cuentas de colaboradores comunes, y nunca la suya.
+  const alcance = async (id: string) => {
+    if (esAdmin) return null;
+    if (id === yo.user.id) return "No puedes cambiar tu propia cuenta desde aquí.";
+    const { data: p } = await admin.from("perfiles").select("rol,es_admin,gestiona_cuentas").eq("id", id).maybeSingle();
+    if (!p) return "La persona no existe.";
+    if (p.rol !== "colaborador" || p.es_admin || p.gestiona_cuentas) return "Solo la administración puede cambiar la cuenta de esta persona.";
+    return null;
+  };
   let datos: Record<string, unknown>;
   try { datos = await req.json(); } catch { return responder({ error: "Datos inválidos." }, 400); }
 
@@ -37,6 +49,7 @@ Deno.serve(async (req) => {
       const { correo, nombre, sede_id, area_id, rol, contrasena } = datos as Record<string, string>;
       if (!correo || !nombre || !sede_id) return responder({ error: "Faltan correo, nombre o sede." }, 400);
       if (!contrasenaValida(contrasena)) return responder({ error: "La contraseña temporal debe tener al menos 8 caracteres." }, 400);
+      if (!esAdmin && (rol ?? "colaborador") !== "colaborador") return responder({ error: "Solo la administración puede crear cuentas de directoras o gerentes." }, 403);
       const { data: u, error } = await admin.auth.admin.createUser({
         email: String(correo).trim().toLowerCase(),
         password: contrasena,
@@ -57,12 +70,14 @@ Deno.serve(async (req) => {
     case "restablecer": {
       const { id, contrasena } = datos as Record<string, string>;
       if (!id || !contrasenaValida(contrasena)) return responder({ error: "Falta la persona o la contraseña tiene menos de 8 caracteres." }, 400);
+      const fuera = await alcance(id); if (fuera) return responder({ error: fuera }, 403);
       const { error } = await admin.auth.admin.updateUserById(id, { password: contrasena, user_metadata: { debe_cambiar_contrasena: true } });
       return error ? responder({ error: error.message }, 400) : responder({ ok: true });
     }
     case "desactivar":
     case "reactivar": {
       const { id } = datos as Record<string, string>;
+      const fuera = await alcance(id); if (fuera) return responder({ error: fuera }, 403);
       const activo = datos.accion === "reactivar";
       const { error } = await admin.auth.admin.updateUserById(id, { ban_duration: activo ? "none" : "876000h" });
       if (error) return responder({ error: error.message }, 400);

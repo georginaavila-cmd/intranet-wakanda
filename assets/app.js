@@ -75,6 +75,9 @@ const PASOS = [
 /* ── Permisos (solo para mostrar u ocultar; la base de datos decide de verdad) ── */
 const P = () => S.perfil || {};
 const esGerencia = () => P().rol === 'gerente' || P().es_admin;
+const gestionaCuentas = () => !!(P().es_admin || P().gestiona_cuentas);
+// Quien gestiona cuentas sin ser administración solo toca colaboradores comunes, y nunca su propia cuenta.
+const puedeTocarCuenta = x => x.id !== P().id && (P().es_admin || (x.rol === 'colaborador' && !x.es_admin && !x.gestiona_cuentas));
 const esLider = () => esGerencia() || P().rol === 'directora';
 const lideraSede = sedeId => esGerencia() || (P().rol === 'directora' && P().sede_id === sedeId);
 const sede = id => S.sedes.find(s => s.id === id) || { nombre: '—', zona_horaria: 'America/Bogota' };
@@ -140,7 +143,7 @@ async function cargarUsuario(user) {
     if (!perfil || !perfil.activo) { S.pantalla = 'sinperfil'; render(); return; }
     if (user.user_metadata && user.user_metadata.debe_cambiar_contrasena) { S.pantalla = 'clave'; render(); return; }
     if (!perfil.acepto_datos) { S.pantalla = 'datos'; render(); return; }
-    S.personas = await q(sb.from('perfiles').select('id,nombre,correo,sede_id,area_id,rol,es_admin,activo').order('nombre'));
+    S.personas = await q(sb.from('perfiles').select('id,nombre,correo,sede_id,area_id,rol,es_admin,gestiona_cuentas,activo').order('nombre'));
     S.pantalla = 'app'; S.view = 'inicio';
     await cargarInicio(); render();
   } catch (e) { S.pantalla = 'login'; S.error = errorTexto(e); render(); }
@@ -204,10 +207,10 @@ function appView() {
   const pendCom = sinConfirmar().length;
   if (esLider()) tabs.push(['asistencia', 'Asistencia'], ['informes', 'Informes']);
   if (moduloSol() || esGerencia()) tabs.push(['solicitudes', 'Solicitudes']);
-  if (p.es_admin) tabs.push(['equipo', 'Equipo']);
+  if (gestionaCuentas()) tabs.push(['equipo', 'Equipo']);
   const pendSol = moduloSol() ? porRevisar().filter(x => puedeAprobar(x)).length : 0;
   const vistas = { informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, guia: guiaView, clave: () => claveView(false) };
-  const rol = { gerente: 'Gerente', directora: 'Directora', colaborador: 'Colaborador' }[p.rol] + (p.es_admin ? ' · administración' : '');
+  const rol = { gerente: 'Gerente', directora: 'Directora', colaborador: 'Colaborador' }[p.rol] + (p.es_admin ? ' · administración' : p.gestiona_cuentas ? ' · cuentas' : '');
   return `<header class="top"><div class="wrap">
       <div class="brand"><img src="assets/logo-wakanda.png" alt=""><span>Wakanda Travel</span></div>
       <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}${k === 'comunicados' && pendCom ? `<span class="badge" aria-label="${pendCom} sin confirmar">${pendCom}</span>` : ''}${k === 'solicitudes' && pendSol ? `<span class="badge" aria-label="${pendSol} por revisar">${pendSol}</span>` : ''}</button>`).join('')}</nav>
@@ -254,10 +257,18 @@ function guiaView() {
     { id: 'g-gerencia', t: 'Para la gerencia y administración', si: esGerencia(), html: `
       ${P().es_admin ? `<p><b>Cuentas</b> (pestaña <b>Equipo</b>).</p>
       <ul><li><b>Crear:</b> nombre, correo corporativo, sede, área y rol. La contraseña temporal se muestra <b>una sola vez</b>: cópiala y entrégala en privado. La persona la cambia al primer ingreso.</li>
-      <li><b>Restablecer contraseña:</b> para quien la olvidó.</li>
-      <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li></ul>` : ''}
+      <li><b>Nueva contraseña:</b> para quien la olvidó.</li>
+      <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li>
+      <li><b>Crea cuentas:</b> marca esa casilla para que otra persona (por ejemplo, contabilidad) pueda crear y administrar cuentas de colaboradores, sin darle acceso a informes, aprobaciones ni configuración.</li></ul>` : ''}
       <p><b>Solicitudes.</b> En <b>Solicitudes</b> activas o apagas el módulo para todo el equipo y asignas los <b>revisores</b>: quién puede ver, aprobar y rechazar, por sede y por tipo (por ejemplo, contabilidad para incapacidades). Las directoras solo revisan si las asignas. Nadie aprueba sus propias solicitudes.</p>
       <p><b>Informes.</b> Ves ambas sedes o una sola, con los indicadores del mes, la gráfica por día, el ranking de llegadas tarde y la confirmación de comunicados.</p>` },
+    { id: 'g-cuentas', t: 'Para quien administra cuentas', si: !!P().gestiona_cuentas && !P().es_admin, html: `
+      <p>La administración te dio permiso para manejar las cuentas de los colaboradores desde la pestaña <b>Equipo</b>.</p>
+      <ul><li><b>Crear:</b> nombre, correo corporativo, sede y área. La contraseña temporal se muestra <b>una sola vez</b>: cópiala y entrégala en privado. La persona la cambia al primer ingreso.</li>
+      <li><b>Nueva contraseña:</b> para quien la olvidó.</li>
+      <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li>
+      <li>También puedes cambiar la sede y el área de los colaboradores.</li></ul>
+      <p>Las cuentas de directoras, gerentes, administración y la tuya propia solo las cambia la administración.</p>` },
     { id: 'g-faq', t: 'Preguntas frecuentes', html: `
       <p><b>Olvidé mi contraseña.</b> Pídele a la gerencia que la restablezca; recibirás una temporal.</p>
       <p><b>¿Puedo marcar desde el celular?</b> ${S.config.validar_ip && S.config.validar_ip.activo ? 'No. Solo se puede marcar desde la oficina.' : 'Pronto solo se podrá marcar desde la oficina y tu computador asignado. Acostúmbrate a marcar desde tu puesto.'}</p>
@@ -894,17 +905,18 @@ function equipoView() {
         <div class="field"><label for="nCorreo">Correo corporativo</label><input id="nCorreo" type="email" required placeholder="nombre@wakandatravel.com.co"></div>
         <div class="field"><label for="nSede">Sede</label><select id="nSede">${opt(S.sedes, P().sede_id)}</select></div>
         <div class="field"><label for="nArea">Área</label><select id="nArea">${opt(S.areas, null)}</select></div>
-        <div class="field"><label for="nRol">Rol</label><select id="nRol"><option value="colaborador">Colaborador</option><option value="directora">Directora de operaciones</option><option value="gerente">Gerente</option></select></div>
+        <div class="field"><label for="nRol">Rol</label><select id="nRol" ${P().es_admin ? '' : 'disabled'}><option value="colaborador">Colaborador</option>${P().es_admin ? '<option value="directora">Directora de operaciones</option><option value="gerente">Gerente</option>' : ''}</select>${P().es_admin ? '' : '<span class="hint">Las cuentas de directoras y gerentes las crea la administración.</span>'}</div>
       </div><div><button class="btn teal" type="submit">${ico('plus')} Crear cuenta</button></div></form></section>
     <section><div class="sec-h"><h2>Personas <span class="hint num">(${S.personas.filter(x => x.activo).length} activas)</span></h2>
       <div class="search" style="flex:0 1 260px"><input id="eFiltro" type="search" placeholder="Buscar por nombre o correo" value="${esc(S.equipo.filtro)}" aria-label="Buscar personas" style="padding-left:14px"></div></div>
-      <div class="card tablewrap"><table class="perm"><thead><tr><th>Persona</th><th>Sede</th><th>Área</th><th>Rol</th><th>Estado</th><th></th></tr></thead><tbody>
-      ${lista.map(x => { const yo = x.id === P().id; return `<tr class="${x.activo ? '' : 'inactivo'}"><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(x.correo)}</small></div></div></td>
-        <td><select data-perfil="${x.id}|sede_id" aria-label="Sede de ${esc(x.nombre)}" ${yo ? 'disabled' : ''}>${opt(S.sedes, x.sede_id)}</select></td>
-        <td><select data-perfil="${x.id}|area_id" aria-label="Área de ${esc(x.nombre)}">${opt(S.areas, x.area_id)}</select></td>
-        <td><select data-perfil="${x.id}|rol" aria-label="Rol de ${esc(x.nombre)}" ${yo ? 'disabled' : ''}>${['colaborador', 'directora', 'gerente'].map(r => `<option value="${r}" ${x.rol === r ? 'selected' : ''}>${{ colaborador: 'Colaborador', directora: 'Directora', gerente: 'Gerente' }[r]}</option>`).join('')}</select>${x.es_admin ? '<div class="hint">Administración</div>' : ''}</td>
+      <div class="card tablewrap"><table class="perm"><thead><tr><th>Persona</th><th>Sede</th><th>Área</th><th>Rol</th>${P().es_admin ? '<th>Crea cuentas</th>' : ''}<th>Estado</th><th></th></tr></thead><tbody>
+      ${lista.map(x => { const yo = x.id === P().id, ed = puedeTocarCuenta(x); return `<tr class="${x.activo ? '' : 'inactivo'}"><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(x.correo)}</small></div></div></td>
+        <td><select data-perfil="${x.id}|sede_id" aria-label="Sede de ${esc(x.nombre)}" ${ed ? '' : 'disabled'}>${opt(S.sedes, x.sede_id)}</select></td>
+        <td><select data-perfil="${x.id}|area_id" aria-label="Área de ${esc(x.nombre)}" ${ed || (yo && P().es_admin) ? '' : 'disabled'}>${opt(S.areas, x.area_id)}</select></td>
+        <td><select data-perfil="${x.id}|rol" aria-label="Rol de ${esc(x.nombre)}" ${!yo && P().es_admin ? '' : 'disabled'}>${['colaborador', 'directora', 'gerente'].map(r => `<option value="${r}" ${x.rol === r ? 'selected' : ''}>${{ colaborador: 'Colaborador', directora: 'Directora', gerente: 'Gerente' }[r]}</option>`).join('')}</select>${x.es_admin ? '<div class="hint">Administración</div>' : x.gestiona_cuentas ? '<div class="hint">Crea cuentas</div>' : ''}</td>
+        ${P().es_admin ? `<td>${x.es_admin ? '<span class="hint">Siempre</span>' : `<label class="check"><input type="checkbox" data-gestor="${x.id}" ${x.gestiona_cuentas ? 'checked' : ''} aria-label="${esc(x.nombre)} puede crear cuentas"> Sí</label>`}</td>` : ''}
         <td><span class="chip ${x.activo ? 'ok' : 'mute'}">${x.activo ? 'Activa' : 'Desactivada'}</span></td>
-        <td style="white-space:nowrap">${yo ? '<span class="hint">Tu cuenta</span>' : `<button class="btn ghost sm" type="button" data-restablecer="${x.id}">Restablecer contraseña</button>
+        <td class="acc">${yo ? '<span class="hint">Tu cuenta</span>' : !ed ? '<span class="hint">Solo administración</span>' : `<button class="btn ghost sm" type="button" data-restablecer="${x.id}">Nueva contraseña</button>
           <button class="btn sm ${x.activo ? 'danger' : 'ghost'}" type="button" data-activar="${x.id}|${x.activo ? 'desactivar' : 'reactivar'}">${x.activo ? 'Desactivar' : 'Reactivar'}</button>`}</td></tr>`; }).join('')}
       </tbody></table></div></section>`;
 }
@@ -914,7 +926,7 @@ async function funcionCuentas(cuerpo) {
   if (data && data.error) throw new Error(data.error);
   return data;
 }
-async function recargarPersonas() { S.personas = await q(sb.from('perfiles').select('id,nombre,correo,sede_id,area_id,rol,es_admin,activo').order('nombre')); }
+async function recargarPersonas() { S.personas = await q(sb.from('perfiles').select('id,nombre,correo,sede_id,area_id,rol,es_admin,gestiona_cuentas,activo').order('nombre')); }
 
 /* ── Navegación ── */
 async function ir(view) {
@@ -1147,6 +1159,11 @@ document.addEventListener('change', async e => {
       await q(sb.from('turnos').update({ [campo]: v }).eq('id', Number(id)));
       S.turnos = await q(sb.from('turnos').select('*').order('sede_id').order('id'));
       render(); toast('Turno actualizado. La malla y la asistencia ya usan el nuevo horario.'); return;
+    }
+    if (el.dataset.gestor) {
+      const x = persona(el.dataset.gestor);
+      await q(sb.from('perfiles').update({ gestiona_cuentas: el.checked }).eq('id', x.id));
+      await recargarPersonas(); render(); toast(el.checked ? `${x.nombre} ya puede crear cuentas de colaboradores.` : `${x.nombre} ya no puede crear cuentas.`); return;
     }
     if (el.dataset.perfil) {
       const [id, campo] = el.dataset.perfil.split('|'), v = campo === 'rol' ? el.value : Number(el.value);

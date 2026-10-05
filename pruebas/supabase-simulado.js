@@ -23,7 +23,7 @@
   const iso = d => d.toISOString().slice(0, 10), hoy = new Date(hoyTz('America/Bogota') + 'T12:00:00Z');
   ejemplo.forEach(([nombre, areaId, sedeId, prop], k) => {
     const id = `00000000-0000-0000-0000-0000000001${k}0`;
-    DB.perfiles.push({ id, nombre, correo: `${nombre.split(' ')[0].toLowerCase()}@x.co`, sede_id: sedeId, area_id: areaId, rol: 'colaborador', es_admin: false, activo: true, acepto_datos: '2026-01-01' });
+    DB.perfiles.push({ id, nombre, correo: `${nombre.split(' ')[0].toLowerCase()}@x.co`, sede_id: sedeId, area_id: areaId, rol: 'colaborador', es_admin: false, activo: true, acepto_datos: '2026-01-01', gestiona_cuentas: k === 0 });
     const tz = sedeId === 1 ? 'America/Bogota' : 'America/Santo_Domingo', off = sedeId === 1 ? 5 : 4;
     for (let i = 1; i <= 45; i++) {
       const d = new Date(hoy); d.setUTCDate(d.getUTCDate() - i); if (d.getUTCDay() === 0) continue;
