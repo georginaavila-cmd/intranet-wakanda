@@ -6,6 +6,24 @@
 
 const sb = window.supabase.createClient(window.WAKANDA_CONFIG.supabaseUrl, window.WAKANDA_CONFIG.supabaseKey);
 
+/* ── Versión: si se publicó una nueva, recargar solo (el navegador guarda la página anterior hasta 10 minutos) ── */
+const VERSION = (/[?&]v=([\w-]+)/.exec((document.currentScript || {}).src || '') || [])[1] || '';
+async function revisarVersion() {
+  if (!VERSION || location.protocol === 'file:') return;
+  try {
+    const html = await (await fetch('index.html?_=' + Date.now(), { cache: 'no-store' })).text();
+    const nueva = (/assets\/app\.js\?v=([\w-]+)/.exec(html) || [])[1];
+    if (nueva && nueva !== VERSION) {
+      const clave = 'recarga-' + nueva;
+      if (sessionStorage.getItem(clave)) return;          // evita recargar en bucle
+      sessionStorage.setItem(clave, '1');
+      location.replace(location.pathname + '?v=' + nueva);
+    }
+  } catch (_) {}
+}
+revisarVersion();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revisarVersion(); });
+
 /* ── Íconos (Lucide, trazo 2px) ── */
 const IC = {
   in: '<path d="m10 17 5-5-5-5"/><path d="M15 12H3"/><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>',
