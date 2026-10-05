@@ -430,7 +430,8 @@ function turnosView() {
     : (f.includes('almuerzo') && t.salida_almuerzo == null) ? '<span class="hint">Sin almuerzo</span>'
     : `<input type="time" data-turno="${t.id}|${f}" value="${hhmm(t[f])}" aria-label="${lbl} del turno ${esc(t.nombre)}">`;
   return `<section style="margin-top:32px"><div class="sec-h"><h2>Turnos</h2>
-      ${sedesEd.length > 1 ? `<select id="tSede" aria-label="Sede de los turnos">${sedesEd.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${esc(s.nombre)}</option>`).join('')}</select>` : ''}</div>
+      <span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${sedesEd.length > 1 ? `<select id="tSede" aria-label="Sede de los turnos">${sedesEd.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${esc(s.nombre)}</option>`).join('')}</select>` : ''}
+      <button class="btn sm teal" type="button" data-accion="agregarTurno">${ico('plus')} Agregar turno</button></span></div>
     <div class="notice">${ico('alert')}<div><b>Los turnos iniciales son de ejemplo.</b> Ajusta los nombres y las horas a los horarios reales de la sede ${esc(sede(sid).nombre)}. La malla, el pase de jornada y la asistencia usan estos horarios.</div></div>
     <div class="card tablewrap"><table class="turnos"><thead><tr><th>Código</th><th>Nombre</th><th>Entrada</th><th>Sale a almorzar</th><th>Regresa</th><th>Salida</th></tr></thead><tbody>
       ${lista.map(t => `<tr><td><span class="chip ${claseTurno(t)}">${esc(t.codigo)}</span></td><td>${inp(t, 'nombre')}</td>
@@ -1095,6 +1096,18 @@ document.addEventListener('click', async e => {
     await cargarInicio(); render(); toast(`${PASOS.find(p => p.k === b.dataset.marcar).lbl} registrada a las ${horaEn(miTz())}.`); return;
   }
   if (b.dataset.semana) { S.malla.lunes = sumarDias(S.malla.lunes, Number(b.dataset.semana)); await cargarMalla(); render(); return; }
+  if (a === 'agregarTurno') {
+    // Nueva franja con código numérico consecutivo por sede (1, 2, 3…) y un horario base que luego se ajusta.
+    const sid = S.turnoSede, nums = S.turnos.filter(t => t.sede_id === sid && /^\d+$/.test(t.codigo)).map(t => Number(t.codigo));
+    const n = nums.length ? Math.max(...nums) + 1 : 1;
+    ocupado(b, true);
+    try {
+      await q(sb.from('turnos').insert({ sede_id: sid, codigo: String(n), nombre: `Turno ${n}`, entrada: '08:00', salida_almuerzo: '12:00', regreso_almuerzo: '13:00', salida: '17:00', activo: true }));
+      S.turnos = await q(sb.from('turnos').select('*').order('sede_id').order('id'));
+      render(); toast(`Turno ${n} agregado en ${sede(sid).nombre}. Ajusta su nombre y sus horarios.`);
+    } catch (err) { ocupado(b, false); toast(errorTexto(err)); }
+    return;
+  }
   if (a === 'copiarSemana') {
     const ant = sumarDias(S.malla.lunes, -7);
     try {
