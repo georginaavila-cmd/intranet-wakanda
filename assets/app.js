@@ -98,6 +98,7 @@ const gestionaCuentas = () => !!(P().es_admin || P().rol === 'supervisor');
 // Quien gestiona cuentas sin ser administración solo toca colaboradores comunes, y nunca su propia cuenta.
 const puedeTocarCuenta = x => x.id !== P().id && (P().es_admin || (x.rol === 'colaborador' && !x.es_admin));
 // La malla la editan quienes lideran la sede y, además, los supervisores (en todas las sedes).
+// Los supervisores también editan los horarios de los turnos, en todas las sedes.
 const editaMalla = sedeId => lideraSede(sedeId) || P().rol === 'supervisor';
 const esLider = () => esGerencia() || P().rol === 'directora';
 const lideraSede = sedeId => esGerencia() || (P().rol === 'directora' && P().sede_id === sedeId);
@@ -289,7 +290,7 @@ function guiaView() {
       <li><b>Nueva contraseña:</b> para quien la olvidó.</li>
       <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li>
       <li>También puedes cambiar la sede y el área de los colaboradores.</li></ul>
-      <p><b>Malla de horarios.</b> En <b>Malla</b> puedes asignar el turno de cada persona, en todas las sedes, y usar <b>Copiar la semana anterior</b>. Los horarios de cada turno los ajustan las directoras.</p>
+      <p><b>Malla de horarios.</b> En <b>Malla</b> puedes asignar el turno de cada persona, en todas las sedes, y usar <b>Copiar la semana anterior</b>. Debajo de la malla, en <b>Turnos</b>, también puedes ajustar el nombre y los horarios de cada turno de cualquier sede.</p>
       <p>Las cuentas de directoras, gerentes, administración y la tuya propia solo las cambia la administración.</p>` },
     { id: 'g-faq', t: 'Preguntas frecuentes', html: `
       <p><b>Olvidé mi contraseña.</b> Pídele a la gerencia que la restablezca; recibirás una temporal.</p>
@@ -397,7 +398,7 @@ async function cargarMalla() {
   if (!S.malla.lunes) S.malla.lunes = lunesDe(fechaEn(miTz()));
   if (S.malla.sede == null) S.malla.sede = esGerencia() || P().rol === 'supervisor' ? 0 : P().sede_id;
   S.malla.filas = await q(sb.from('malla').select('persona_id,fecha,turno_id').gte('fecha', S.malla.lunes).lte('fecha', sumarDias(S.malla.lunes, 5)));
-  if (esLider() && !S.turnoSede) S.turnoSede = esGerencia() ? S.sedes[0]?.id : P().sede_id;
+  if ((esLider() || P().rol === 'supervisor') && !S.turnoSede) S.turnoSede = esGerencia() || P().rol === 'supervisor' ? S.sedes[0]?.id : P().sede_id;
 }
 function mallaView() {
   const lunes = S.malla.lunes, hoy = fechaEn(miTz());
@@ -410,7 +411,7 @@ function mallaView() {
       <option value="">—</option>${ops.map(o => `<option value="${o.id}" ${t && t.id === o.id ? 'selected' : ''}>${esc(o.nombre)}</option>`).join('')}</select></td>`;
   };
   const filas = gente.map(x => `<tr><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(area(x.area_id).nombre)} · ${esc(sede(x.sede_id).nombre)}</small></div></div></td>${DIAS.map((_, i) => celda(x, i)).join('')}</tr>`).join('');
-  const ayuda = P().rol === 'supervisor' ? 'Como supervisor puedes cambiar la malla de todas las sedes. Cada cambio queda guardado en el historial.'
+  const ayuda = P().rol === 'supervisor' ? 'Como supervisor puedes cambiar la malla y los turnos de todas las sedes. Cada cambio queda guardado en el historial.'
     : !esLider() ? 'La malla es pública: todo el equipo la ve. Solo la directora de cada sede, la gerencia y los supervisores pueden cambiarla.'
     : esGerencia() ? 'Puedes cambiar los turnos de las dos sedes. Cada cambio queda guardado en el historial.' : `Puedes cambiar los turnos de la sede ${esc(sede(P().sede_id).nombre)}. Cada cambio queda guardado en el historial.`;
   return `<div class="hello"><div><div class="eyebrow">Intranet · semana del ${esc(fechaCorta(lunes))}</div><h1>Malla de <em>horarios</em></h1><p>${ayuda}</p></div></div>
@@ -419,10 +420,10 @@ function mallaView() {
       ${esLider() || P().rol === 'supervisor' ? `<button class="btn ghost sm" type="button" data-accion="copiarSemana">Copiar la semana anterior</button>` : ''}</span></div>
     <div class="card tablewrap"><table><thead><tr><th>Persona</th>${DIAS.map((d, i) => { const f = sumarDias(lunes, i); return `<th class="${f === hoy ? 'today' : ''}">${d} ${f.slice(8)}${f === hoy ? ' · hoy' : ''}</th>`; }).join('')}</tr></thead>
       <tbody>${filas || '<tr><td colspan="7" class="vacio">No hay personas en esta sede todavía.</td></tr>'}</tbody></table></div>
-    ${esLider() ? turnosView() : ''}`;
+    ${esLider() || P().rol === 'supervisor' ? turnosView() : ''}`;
 }
 function turnosView() {
-  const sedesEd = S.sedes.filter(s => lideraSede(s.id));
+  const sedesEd = S.sedes.filter(s => editaMalla(s.id));
   const sid = S.turnoSede, lista = S.turnos.filter(t => t.sede_id === sid);
   const inp = (t, f, lbl) => t.entrada == null && f !== 'nombre' ? '<span class="hint">—</span>'
     : f === 'nombre' ? `<input type="text" class="tname" data-turno="${t.id}|nombre" value="${esc(t.nombre)}" aria-label="Nombre del turno ${esc(t.codigo)}">`
