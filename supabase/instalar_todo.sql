@@ -496,3 +496,43 @@ insert into configuracion (clave, valor) values
   ('tolerancias', '{"entrada_min": 5, "almuerzo_min": 5}'),     -- minutos antes de contar tarde / almuerzo largo
   ('meta_puntualidad', '{"porcentaje": 95}'),
   ('validar_ip', '{"activo": false}');                          -- se activa en la etapa final, desde la oficina
+
+
+-- ═══ 004_ausencias_y_soportes ═══
+-- Intranet Wakanda Travel · ausencias aprobadas y borrado de soportes
+-- 1. ausencias_aprobadas(): la asistencia y los informes necesitan saber quién está de vacaciones, con permiso o incapacitado,
+--    aunque la líder no sea revisora de solicitudes. Solo devuelve persona, tipo y fechas (nunca motivo ni soportes),
+--    y solo de las personas que quien consulta lidera (o de sí misma).
+-- 2. Quien envió una solicitud pendiente puede borrar sus propios soportes al cancelarla.
+
+create function ausencias_aprobadas(p_desde date, p_hasta date)
+returns table (persona_id uuid, tipo solicitud_tipo_t, desde date, hasta date)
+language sql stable security definer set search_path = public as $$
+  select s.persona_id, s.tipo, s.desde, s.hasta
+  from solicitudes s
+  where s.estado = 'aprobada' and s.hora_desde is null
+    and s.desde <= p_hasta and s.hasta >= p_desde
+    and (s.persona_id = auth.uid() or lidera_sede(sede_de(s.persona_id)))
+$$;
+revoke all on function ausencias_aprobadas(date, date) from public, anon;
+grant execute on function ausencias_aprobadas(date, date) to authenticated;
+
+create policy archivos_soportes_borrar on storage.objects for delete to authenticated
+  using (bucket_id = 'soportes'
+    and exists (select 1 from public.solicitudes s where s.id = public.carpeta_id(name)
+                and s.persona_id = auth.uid() and s.estado = 'pendiente'));
+
+
+-- ═══ 005_permisos_servicio ═══
+-- Intranet · permisos del rol de servicio
+-- La Edge Function crear-usuario usa la llave de servicio (rol service_role) para crear el perfil
+-- y activar o desactivar personas. Con "Automatically expose new tables" apagado, ese rol
+-- tampoco recibe permisos solo: sin esto, crear una cuenta falla con "permission denied for table perfiles".
+
+grant usage on schema public to service_role;
+grant select, insert, update, delete on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to service_role;
+grant execute on all functions in schema public to service_role;
+alter default privileges in schema public grant select, insert, update, delete on tables to service_role;
+alter default privileges in schema public grant usage, select on sequences to service_role;
+alter default privileges in schema public grant execute on functions to service_role;
