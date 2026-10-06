@@ -100,6 +100,8 @@ const puedeTocarCuenta = x => x.id !== P().id && (P().es_admin || (x.rol === 'co
 // La malla la editan quienes lideran la sede y, además, los supervisores (en todas las sedes).
 // Los supervisores también editan los horarios de los turnos, en todas las sedes.
 const editaMalla = sedeId => lideraSede(sedeId) || P().rol === 'supervisor';
+// Quien marca asistencia: todos menos la gerencia (no marca y no debe afectar los indicadores).
+const marcaAsistencia = x => x.rol !== 'gerente';
 const esLider = () => esGerencia() || P().rol === 'directora';
 const lideraSede = sedeId => esGerencia() || (P().rol === 'directora' && P().sede_id === sedeId);
 const sede = id => S.sedes.find(s => s.id === id) || { nombre: '—', zona_horaria: 'America/Bogota' };
@@ -526,7 +528,7 @@ function estadoPersona(x) {
   return { t, m, est };
 }
 function asistenciaView() {
-  const gente = S.personas.filter(x => x.activo && lideraSede(x.sede_id));
+  const gente = S.personas.filter(x => x.activo && marcaAsistencia(x) && lideraSede(x.sede_id));
   const filas = gente.map(x => ({ x, ...estadoPersona(x) }));
   const cnt = k => filas.filter(f => f.est[0] === k).length;
   const fmt = v => v == null ? '' : `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
@@ -855,7 +857,7 @@ async function cargarInforme() {
 }
 function calcularInforme() {
   const D = S.inf.datos, T = tol();
-  const gente = S.personas.filter(x => lideraSede(x.sede_id) && (!S.inf.sede || x.sede_id === S.inf.sede) && (!S.inf.area || x.area_id === S.inf.area) && D.malla.some(r => r.persona_id === x.id));
+  const gente = S.personas.filter(x => marcaAsistencia(x) && lideraSede(x.sede_id) && (!S.inf.sede || x.sede_id === S.inf.sede) && (!S.inf.area || x.area_id === S.inf.area) && D.malla.some(r => r.persona_id === x.id));
   const ids = new Set(gente.map(x => x.id));
   const st = Object.fromEntries(gente.map(x => [x.id, { p: x, dias: 0, tardes: 0, minT: 0, almL: 0, temp: 0, extra: 0, aus: 0, just: 0, sinConf: 0, detalle: [] }]));
   const marcasDe = {};
