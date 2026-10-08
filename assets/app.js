@@ -152,22 +152,26 @@ function vista() {
 }
 
 /* ── Arranque y sesión ── */
+// Corta una espera si el servidor no responde, para no dejar la pantalla en "Cargando" indefinidamente.
+const conTiempo = (promesa, ms = 20000) => Promise.race([promesa, new Promise((_, no) => setTimeout(() => no(new Error('Failed to fetch')), ms))]);
 async function iniciar() {
-  const { data } = await sb.auth.getSession();
-  if (!data.session) { S.pantalla = 'login'; render(); return; }
-  await cargarUsuario(data.session.user);
+  try {
+    const { data } = await conTiempo(sb.auth.getSession());
+    if (!data.session) { S.pantalla = 'login'; render(); return; }
+    await cargarUsuario(data.session.user);
+  } catch (e) { S.pantalla = 'login'; S.error = errorTexto(e); render(); }
 }
 async function cargarUsuario(user) {
   S.usuario = user; S.pantalla = 'cargando'; render();
   try {
-    const [perfil, sedes, areas, turnos, herr, conf] = await Promise.all([
+    const [perfil, sedes, areas, turnos, herr, conf] = await conTiempo(Promise.all([
       q(sb.from('perfiles').select('*').eq('id', user.id).maybeSingle()),
       q(sb.from('sedes').select('id,nombre,zona_horaria').order('id')),
       q(sb.from('areas').select('id,nombre').order('id')),
       q(sb.from('turnos').select('*').order('sede_id').order('id')),
       q(sb.from('herramientas').select('*').eq('activo', true).order('orden')),
       q(sb.from('configuracion').select('clave,valor'))
-    ]);
+    ]));
     S.perfil = perfil; S.sedes = sedes; S.areas = areas; S.turnos = turnos; S.herramientas = herr;
     S.config = Object.fromEntries(conf.map(c => [c.clave, c.valor]));
     if (!perfil || !perfil.activo) { S.pantalla = 'sinperfil'; render(); return; }
