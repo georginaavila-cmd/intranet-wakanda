@@ -67,3 +67,5 @@ table.malla select.shift { min-width: 92px; max-width: 220px; text-align-last: l
 .f7 { background: #e0f0f8; color: #1d5f80; }
 .f8 { background: #f4e9e1; color: #7a4b2a; }
 .f9 { background: #eaecef; color: #3f4a59; }
+.editar-persona { display: grid; gap: 6px; min-width: 220px; }
+.editar-persona input { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }

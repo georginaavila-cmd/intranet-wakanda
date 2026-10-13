@@ -98,7 +98,7 @@ const S = {
   malla: { lunes: null, sede: null, filas: [], base: [], vista: 'semana', edit: null, guardando: false },
   turnoSede: null,
   asistencia: { filas: [] },
-  equipo: { claveNueva: null, filtro: '' },
+  equipo: { claveNueva: null, filtro: '', editando: null },
   inf: { mes: null, sede: 0, area: 0, orden: 'minT', sel: null, datos: null },
   com: { lista: [], imgs: {}, lect: [], filtro: 'todos', q: '', borrador: [], hl: null },
   lb: null,
@@ -1026,12 +1026,16 @@ function equipoView() {
     <section><div class="sec-h"><h2>Personas <span class="hint num">(${S.personas.filter(x => x.activo).length} activas)</span></h2>
       <div class="search" style="flex:0 1 260px"><input id="eFiltro" type="search" placeholder="Buscar por nombre o correo" value="${esc(S.equipo.filtro)}" aria-label="Buscar personas" style="padding-left:14px"></div></div>
       <div class="card tablewrap"><table class="perm"><thead><tr><th>Persona</th><th>Sede</th><th>Área</th><th>Rol</th><th>Estado</th><th></th></tr></thead><tbody>
-      ${lista.map(x => { const yo = x.id === P().id, ed = puedeTocarCuenta(x); return `<tr class="${x.activo ? '' : 'inactivo'}"><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(x.correo)}</small></div></div></td>
+      ${lista.map(x => { const yo = x.id === P().id, ed = puedeTocarCuenta(x); return `<tr class="${x.activo ? '' : 'inactivo'}"><td>${S.equipo.editando === x.id
+          ? `<form class="editar-persona" data-editarpersona="${x.id}" novalidate><input name="nombre" value="${esc(x.nombre)}" aria-label="Nombre completo" required><input name="correo" type="email" value="${esc(x.correo)}" aria-label="Correo corporativo" required>
+             <span><button class="btn sm teal" type="submit">Guardar</button> <button class="btn ghost sm" type="button" data-accion="cancelarEdicion">Cancelar</button></span></form>`
+          : `<div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(x.correo)}</small></div></div>`}</td>
         <td><select data-perfil="${x.id}|sede_id" aria-label="Sede de ${esc(x.nombre)}" ${ed ? '' : 'disabled'}>${opt(S.sedes, x.sede_id)}</select></td>
         <td><select data-perfil="${x.id}|area_id" aria-label="Área de ${esc(x.nombre)}" ${ed || (yo && P().es_admin) ? '' : 'disabled'}>${opt(S.areas, x.area_id)}</select></td>
         <td><select data-perfil="${x.id}|rol" aria-label="Rol de ${esc(x.nombre)}" ${!yo && P().es_admin ? '' : 'disabled'}>${Object.entries(ROLES).map(([r, l]) => `<option value="${r}" ${x.rol === r ? 'selected' : ''}>${l}</option>`).join('')}</select>${x.es_admin ? '<div class="hint">Administración</div>' : x.rol === 'supervisor' ? '<div class="hint">Crea cuentas</div>' : ''}</td>
         <td><span class="chip ${x.activo ? 'ok' : 'mute'}">${x.activo ? 'Activa' : 'Desactivada'}</span></td>
-        <td class="acc">${yo ? '<span class="hint">Tu cuenta</span>' : !ed ? '<span class="hint">Solo administración</span>' : `<button class="btn ghost sm" type="button" data-restablecer="${x.id}">Nueva contraseña</button>
+        <td class="acc">${yo ? '<span class="hint">Tu cuenta</span>' : !ed ? '<span class="hint">Solo administración</span>' : `<button class="btn ghost sm" type="button" data-editar-persona="${x.id}">Editar</button>
+          <button class="btn ghost sm" type="button" data-restablecer="${x.id}">Nueva contraseña</button>
           <button class="btn sm ${x.activo ? 'danger' : 'ghost'}" type="button" data-activar="${x.id}|${x.activo ? 'desactivar' : 'reactivar'}">${x.activo ? 'Desactivar' : 'Reactivar'}</button>`}</td></tr>`; }).join('')}
       </tbody></table></div></section>`;
 }
@@ -1090,6 +1094,18 @@ document.addEventListener('submit', async e => {
   if (f.id === 'fCom') {
     ocupado(btn, true);
     try { await publicarComunicado(f); } catch (err) { toast(errorTexto(err)); } finally { ocupado(btn, false); }
+    return;
+  }
+  if (f.dataset.editarpersona) {
+    const x = persona(f.dataset.editarpersona), nombre = f.nombre.value.trim(), correo = f.correo.value.trim().toLowerCase();
+    if (!nombre || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) { toast('Escribe el nombre y un correo válido.'); return; }
+    if (nombre === x.nombre && correo === x.correo) { S.equipo.editando = null; render(); return; }
+    ocupado(btn, true);
+    try {
+      await funcionCuentas({ accion: 'editar', id: x.id, nombre, correo });
+      S.equipo.editando = null; await recargarPersonas(); render();
+      toast(correo !== x.correo ? `Datos guardados. ${nombre} ahora entra con ${correo} y la misma contraseña.` : 'Datos guardados.');
+    } catch (err) { ocupado(btn, false); toast(errorTexto(err)); }
     return;
   }
   if (f.id === 'fCuenta') {
@@ -1224,6 +1240,8 @@ document.addEventListener('click', async e => {
     try { await navigator.clipboard.writeText(b.dataset.copiar); toast('Copiado. Pégalo en un mensaje privado.'); } catch (_) { toast('No se pudo copiar; selecciona el texto y cópialo a mano.'); }
     return;
   }
+  if (b.dataset.editarPersona) { S.equipo.editando = b.dataset.editarPersona; render(); document.querySelector('.editar-persona input')?.focus(); return; }
+  if (a === 'cancelarEdicion') { S.equipo.editando = null; render(); return; }
   if (b.dataset.restablecer) {
     const x = persona(b.dataset.restablecer), clave = claveTemporal();
     ocupado(b, true);

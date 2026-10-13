@@ -67,6 +67,18 @@ Deno.serve(async (req) => {
       }
       return responder({ ok: true, id: u.user.id });
     }
+    case "editar": {
+      // Corrige nombre y correo. El correo es el usuario de acceso: se cambia también en Auth, ya confirmado.
+      const { id, nombre, correo } = datos as Record<string, string>;
+      const email = String(correo ?? "").trim().toLowerCase();
+      if (!id || !String(nombre ?? "").trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return responder({ error: "Faltan el nombre o un correo válido." }, 400);
+      const fuera = await alcance(id); if (fuera) return responder({ error: fuera }, 403);
+      const { error } = await admin.auth.admin.updateUserById(id, { email, email_confirm: true });
+      if (error) return responder({ error: /already|exists|registered/i.test(error.message) ? "Ya existe una cuenta con ese correo." : error.message }, 400);
+      const { error: errPerfil } = await admin.from("perfiles").update({ nombre: String(nombre).trim(), correo: email }).eq("id", id);
+      if (errPerfil) return responder({ error: errPerfil.message.includes("duplicate") ? "Ya existe una cuenta con ese correo." : errPerfil.message }, 400);
+      return responder({ ok: true });
+    }
     case "restablecer": {
       const { id, contrasena } = datos as Record<string, string>;
       if (!id || !contrasenaValida(contrasena)) return responder({ error: "Falta la persona o la contraseña tiene menos de 8 caracteres." }, 400);

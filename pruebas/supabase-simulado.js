@@ -106,6 +106,7 @@
       createSignedUrls: async rutas => ({ data: rutas.map(r => ({ path: r, signedUrl: (window.__archivos || {})[r] })), error: null }),
       remove: async () => ({ data: [], error: null }) }) },
     functions: { invoke: async (n, { body }) => {
+      if (body.accion === 'editar') { if (DB.perfiles.some(x => x.correo === body.correo && x.id !== body.id)) return { data: { error: 'Ya existe una cuenta con ese correo.' }, error: null }; Object.assign(DB.perfiles.find(x => x.id === body.id), { nombre: body.nombre, correo: body.correo }); return { data: { ok: true }, error: null }; }
       if (body.accion === 'crear') { DB.perfiles.push({ id: uid(), nombre: body.nombre, correo: body.correo, sede_id: body.sede_id, area_id: body.area_id, rol: body.rol, es_admin: false, activo: true, acepto_datos: null }); return { data: { ok: true }, error: null }; }
       if (body.accion === 'desactivar' || body.accion === 'reactivar') { DB.perfiles.find(p => p.id === body.id).activo = body.accion === 'reactivar'; return { data: { ok: true }, error: null }; }
       return { data: { ok: true }, error: null };
