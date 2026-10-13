@@ -10,24 +10,51 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&family=Lato:wght@400;700;900&display=swap" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="assets/estilos.css?v=20261008a">
-<link rel="stylesheet" href="assets/app.css?v=20261008a">
+<link rel="stylesheet" href="assets/estilos.css?v=20261013a">
+<link rel="stylesheet" href="assets/app.css?v=20261013a">
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando la intranet…</div></div>
 <script>
-/* Si en 20 segundos la intranet no arrancó (red lenta, bloqueo de un antivirus o extensión), mostrar qué hacer. */
-setTimeout(function () {
-  var app = document.getElementById('app');
-  if (!app || !app.querySelector('.cargando')) return;
-  app.innerHTML = '<div class="cargando" style="flex-direction:column;gap:14px;text-align:center;padding:24px">' +
-    '<b style="font-size:18px;color:#1f3b5c">La intranet está tardando en cargar</b>' +
-    '<span style="max-width:460px">Revisa tu conexión a internet y vuelve a intentar. Si sigue igual, abre la intranet en una ventana de incógnito (Ctrl+Shift+N) o en otro navegador, y avísale a la administración.</span>' +
-    '<button type="button" onclick="location.reload()" style="padding:10px 22px;border:0;border-radius:10px;background:#0f8f8a;color:#fff;font-weight:600;cursor:pointer">Reintentar</button></div>';
-}, 20000);
+/* Si la intranet se queda en "Cargando" más de 20 segundos (al abrir o en cualquier momento), mostrar qué hacer
+   y un diagnóstico de conexión para quien maneje la red de la oficina. */
+(function () {
+  var desde = null, mostrado = false;
+  function probar(nombre, url, cabeceras, modo) {
+    var t0 = Date.now(), ctrl = window.AbortController ? new AbortController() : null;
+    var corte = setTimeout(function () { if (ctrl) ctrl.abort(); }, 8000);
+    return fetch(url, { headers: cabeceras || {}, cache: 'no-store', mode: modo || 'cors', signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { return nombre + ': responde (' + (Date.now() - t0) + ' ms)'; })
+      .catch(function () { return nombre + ': NO responde (' + (Date.now() - t0) + ' ms)'; })
+      .then(function (x) { clearTimeout(corte); return x; });
+  }
+  function aviso() {
+    var app = document.getElementById('app');
+    app.innerHTML = '<div class="cargando" style="flex-direction:column;gap:14px;text-align:center;padding:24px">' +
+      '<b style="font-size:18px;color:#1f3b5c">La intranet está tardando en cargar</b>' +
+      '<span style="max-width:480px">Revisa tu conexión y vuelve a intentar. Si sigue igual, cierra las demás pestañas de la intranet, abre una ventana de incógnito (Ctrl+Shift+N) o usa otro navegador, y envíale a la administración una captura de este diagnóstico.</span>' +
+      '<pre id="diag" style="text-align:left;font-size:12px;background:#fff;border:1px solid #dde3ea;border-radius:8px;padding:10px 14px;margin:0;white-space:pre-wrap">Probando la conexión…</pre>' +
+      '<button type="button" onclick="location.reload()" style="padding:10px 22px;border:0;border-radius:10px;background:#0f8f8a;color:#fff;font-weight:600;cursor:pointer">Reintentar</button></div>';
+    var c = window.WAKANDA_CONFIG || {};
+    Promise.all([
+      probar('Página de la intranet', location.pathname + 'index.html?_=' + Date.now()),
+      c.supabaseUrl ? probar('Servidor de datos (supabase.co)', c.supabaseUrl + '/auth/v1/health', { apikey: c.supabaseKey }) : Promise.resolve('Servidor de datos: sin configuración cargada'),
+      probar('Internet general (google.com)', 'https://www.google.com/generate_204', null, 'no-cors')
+    ]).then(function (r) {
+      var d = document.getElementById('diag');
+      if (d) d.textContent = r.join('\n') + '\nNavegador: ' + navigator.userAgent.replace(/^Mozilla\/5.0 /, '') + '\nHora: ' + new Date().toLocaleString('es-CO');
+    });
+  }
+  setInterval(function () {
+    var app = document.getElementById('app');
+    if (!app || !app.querySelector('.cargando') || app.querySelector('#diag')) { desde = null; mostrado = false; return; }
+    if (!desde) desde = Date.now();
+    if (!mostrado && Date.now() - desde > 20000) { mostrado = true; aviso(); }
+  }, 2000);
+})();
 </script>
 <script src="assets/vendor/supabase-2.45.4.js"></script>
-<script src="assets/config.js?v=20261008a"></script>
-<script src="assets/app.js?v=20261008a"></script>
+<script src="assets/config.js?v=20261013a"></script>
+<script src="assets/app.js?v=20261013a"></script>
 </body>
 </html>

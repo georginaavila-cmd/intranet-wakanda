@@ -4,7 +4,29 @@
 (() => {
 'use strict';
 
-const sb = window.supabase.createClient(window.WAKANDA_CONFIG.supabaseUrl, window.WAKANDA_CONFIG.supabaseKey);
+/* Conexión resistente a redes inestables:
+   - Cada petición tiene tiempo máximo. Si el Wi-Fi deja una conexión colgada, se corta y se reintenta
+     (consultas: 15 s y hasta 3 intentos; sesión: 20 s y 2 intentos; guardados y archivos: 60 s, un intento) en vez de esperar para siempre.
+   - Sin candado entre pestañas: una pestaña vieja o congelada ya no puede dejar a las demás esperando la sesión. */
+async function fetchConTiempo(url, opciones = {}) {
+  const metodo = String(opciones.method || 'GET').toUpperCase(), lectura = metodo === 'GET' || metodo === 'HEAD';
+  const sesion = String(url).includes('/auth/v1/');   // iniciar sesión y renovar la sesión: cortos y con reintento
+  const intentos = lectura ? 3 : sesion ? 2 : 1, limite = lectura ? 15000 : sesion ? 20000 : 60000;
+  for (let i = 0; i < intentos; i++) {
+    const ctrl = new AbortController(), reloj = setTimeout(() => ctrl.abort(), limite);
+    if (opciones.signal) { if (opciones.signal.aborted) ctrl.abort(); else opciones.signal.addEventListener('abort', () => ctrl.abort()); }
+    try { return await fetch(url, { ...opciones, signal: ctrl.signal }); }
+    catch (e) {
+      if (opciones.signal && opciones.signal.aborted) throw e;
+      if (i === intentos - 1) throw new TypeError('Failed to fetch');
+      await new Promise(r => setTimeout(r, 700 * (i + 1)));
+    } finally { clearTimeout(reloj); }
+  }
+}
+const sb = window.supabase.createClient(window.WAKANDA_CONFIG.supabaseUrl, window.WAKANDA_CONFIG.supabaseKey, {
+  global: { fetch: fetchConTiempo },
+  auth: { lock: async (_nombre, _espera, fn) => await fn() }
+});
 
 /* ── Versión: si se publicó una nueva, recargar solo (el navegador guarda la página anterior hasta 10 minutos) ── */
 const VERSION = (/[?&]v=([\w-]+)/.exec((document.currentScript || {}).src || '') || [])[1] || '';
