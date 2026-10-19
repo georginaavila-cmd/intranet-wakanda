@@ -574,7 +574,8 @@ function asistenciaView() {
         <input type="date" id="asisDia" value="${dia}" max="${sumarDias(hoyR, 31)}" aria-label="Elegir día">
         <button class="btn ghost sm" type="button" data-asisdia="1" aria-label="Día siguiente">Siguiente ›</button>
         ${esHoy ? '' : '<button class="btn ghost sm" type="button" data-asisdia="0">Hoy</button>'}
-        <button class="btn ghost sm" type="button" data-accion="recargarAsistencia">Actualizar</button></div></div>
+        <button class="btn ghost sm" type="button" data-accion="recargarAsistencia">Actualizar</button>
+        <button class="btn ghost sm" type="button" data-accion="exportarAsistencia">${ico('file')} Exportar a Excel</button></div></div>
     <div class="kpis">${kpi('ok', cnt('ok'), 'Al día', 'check')}${kpi('warn', cnt('warn'), 'Con novedad', 'alert')}${kpi('bad', cnt('bad'), 'Sin marcar entrada', 'x')}${kpi('mute', cnt('mute') + cnt('info'), 'Descanso o por llegar', 'moon')}</div>
     <div class="card tablewrap"><table><thead><tr><th>Persona</th><th>Turno</th><th>Entrada</th><th>Sale a almorzar</th><th>Regresa</th><th>Salida</th><th>Estado</th></tr></thead><tbody>
       ${filas.map(f => `<tr><td><div class="person"><div class="avatar soft">${initials(f.x.nombre)}</div><div><b>${esc(f.x.nombre)}</b><small>${esc(area(f.x.area_id).nombre)} · ${esc(sede(f.x.sede_id).nombre)}</small></div></div></td>
@@ -1010,6 +1011,22 @@ function informesView() {
           <td class="n"><span class="chip ${x.dias ? pcCls(pc(x)) : 'mute'}">${x.dias ? pc(x) + ' %' : '—'}</span></td></tr>`).join('') || '<tr><td colspan="12" class="vacio">No hay personas en este grupo.</td></tr>'}
       </tbody></table></div></section>`;
 }
+// Descarga la asistencia del día elegido, con las mismas filas y estados que se ven en pantalla.
+function exportarAsistencia() {
+  const fmt = v => v == null ? '' : `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+  const gente = S.personas.filter(x => x.activo && marcaAsistencia(x) && lideraSede(x.sede_id));
+  const filas = [['Fecha', 'Persona', 'Correo', 'Sede', 'Área', 'Turno', 'Horario', 'Entrada', 'Sale a almorzar', 'Regresa', 'Salida', 'Estado', 'Novedades']];
+  for (const x of gente) {
+    const { t, m, est } = estadoPersona(x), f = diaAsistencia(sede(x.sede_id).zona_horaria);
+    const nov = PASOS.map(p => m[p.k] != null ? evaluar(p.k, m[p.k], t, m) : null).filter(ev => ev && (ev[0] === 'warn' || ev[0] === 'info')).map(ev => ev[1]).join(' · ');
+    filas.push([f, x.nombre, x.correo, sede(x.sede_id).nombre, area(x.area_id).nombre, t ? t.nombre : 'Sin turno', t && t.entrada ? `${hhmm(t.entrada)}–${hhmm(t.salida)}` : '',
+      ...PASOS.map(p => fmt(m[p.k])), est[1], nov]);
+  }
+  const csv = '\ufeff' + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `asistencia-dia-${S.asisDia || fechaEn(miTz())}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  toast('Asistencia descargada. Ábrela con Excel.');
+}
 function exportarInforme() {
   const I = calcularInforme(), pc = x => x.dias ? Math.round((1 - x.tardes / x.dias) * 100) : '';
   const filas = [['Persona', 'Correo', 'Sede', 'Área', 'Jornadas', 'Llegadas tarde', 'Minutos tarde', 'Promedio tarde (min)', 'Almuerzos largos', 'Salidas antes', 'Horas extra (min)', 'Sin marcar', 'Con permiso', 'Comunicados sin confirmar', 'Puntualidad %'],
@@ -1157,6 +1174,7 @@ document.addEventListener('click', async e => {
   if (b.dataset.view) { ir(b.dataset.view); return; }
   if (a === 'menu') { S.menu = !S.menu; render(); return; }
   if (a === 'exportar') { exportarInforme(); return; }
+  if (a === 'exportarAsistencia') { exportarAsistencia(); return; }
   if (b.dataset.comf) {
     S.com.filtro = b.dataset.comf;
     if (S.view !== 'comunicados') { await ir('comunicados'); return; }
