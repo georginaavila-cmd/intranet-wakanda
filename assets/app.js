@@ -960,8 +960,8 @@ function informesView() {
   const opt = (arr, v) => arr.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const filtros = `<div class="filters">
     <div class="field"><label for="iMes">Período</label><select id="iMes">${opt([...mesesDisponibles().map(k => [k, nombreMes(k).replace(/^./, c => c.toUpperCase())]), ['rango', 'Rango de fechas…']], S.inf.mes)}</select></div>
-    ${S.inf.mes === 'rango' ? `<div class="field"><label for="iDesde">Desde</label><input type="date" id="iDesde" value="${S.inf.desde || ''}" max="${fechaEn(miTz())}"></div>
-      <div class="field"><label for="iHasta">Hasta</label><input type="date" id="iHasta" value="${S.inf.hasta || ''}" max="${fechaEn(miTz())}"></div>` : ''}
+    <div class="field"><label for="iDesde">Desde</label><input type="date" id="iDesde" value="${periodo().desde}" max="${fechaEn(miTz())}"></div>
+    <div class="field"><label for="iHasta">Hasta</label><input type="date" id="iHasta" value="${periodo().hasta}"></div>
     ${esGerencia() ? `<div class="field"><label for="iSede">Sede</label><select id="iSede">${opt([[0, 'Las dos sedes'], ...S.sedes.map(x => [x.id, x.nombre])], S.inf.sede)}</select></div>`
       : `<div class="field"><label>Sede</label><select disabled><option>${esc(sede(P().sede_id).nombre)}</option></select></div>`}
     <div class="field"><label for="iArea">Área</label><select id="iArea">${opt([[0, 'Todas'], ...S.areas.map(a => [a.id, a.nombre])], S.inf.area)}</select></div>
@@ -1380,6 +1380,8 @@ document.addEventListener('change', async e => {
     }
     if (el.id === 'iDesde' || el.id === 'iHasta') {
       if (!el.value) return;
+      // Al tocar Desde o Hasta se pasa a rango libre, partiendo del período que se estaba viendo.
+      if (S.inf.mes !== 'rango') { const p = periodo(); S.inf.desde = p.desde; S.inf.hasta = p.hasta; S.inf.mes = 'rango'; }
       S.inf[el.id === 'iDesde' ? 'desde' : 'hasta'] = el.value;
       if (S.inf.desde && S.inf.hasta && (Date.parse(S.inf.hasta) - Date.parse(S.inf.desde)) / 864e5 > 366) { toast('El rango puede ser de máximo un año.'); return; }
       S.inf.sel = null; S.inf.datos = null; render(); await cargarInforme(); render(); return;
