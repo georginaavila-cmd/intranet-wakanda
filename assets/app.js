@@ -99,7 +99,7 @@ const S = {
   turnoSede: null,
   asistencia: { filas: [] },
   equipo: { claveNueva: null, filtro: '', editando: null },
-  inf: { mes: null, sede: 0, area: 0, orden: 'minT', sel: null, datos: null },
+  inf: { mes: null, desde: null, hasta: null, sede: 0, area: 0, orden: 'minT', sel: null, datos: null },
   com: { lista: [], imgs: {}, lect: [], filtro: 'todos', q: '', borrador: [], hl: null },
   lb: null,
   sol: { lista: [], adj: {}, revisores: [], tipo: 'vacaciones', borrador: [], ausencias: [] }
@@ -877,12 +877,23 @@ const mesesDisponibles = () => { const [y, m] = fechaEn(miTz()).split('-').map(N
 const nombreMes = k => { const [y, m] = k.split('-').map(Number); return `${MESES[m - 1]} ${y}`; };
 const fmtHM = v => `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
 const horasTxt = m => `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+// Período del informe: un mes completo (S.inf.mes = 'AAAA-MM') o un rango libre (S.inf.mes = 'rango' + desde/hasta).
+const fechaMes = d => `${Number(d.slice(8))} ${MESES[Number(d.slice(5, 7)) - 1].slice(0, 3)}`;
+function periodo() {
+  if (S.inf.mes === 'rango' && S.inf.desde && S.inf.hasta) {
+    const [a, b] = S.inf.desde <= S.inf.hasta ? [S.inf.desde, S.inf.hasta] : [S.inf.hasta, S.inf.desde];
+    const titulo = a === b ? fechaLarga(a) : `${fechaMes(a)}${a.slice(0, 4) !== b.slice(0, 4) ? ' ' + a.slice(0, 4) : ''} al ${fechaMes(b)} ${b.slice(0, 4)}`;
+    return { desde: a, hasta: b, titulo, clave: `${a}_a_${b}` };
+  }
+  const [y, m] = S.inf.mes.split('-').map(Number);
+  return { desde: `${S.inf.mes}-01`, hasta: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10), titulo: nombreMes(S.inf.mes), clave: S.inf.mes };
+}
 const meta = () => (S.config.meta_puntualidad && S.config.meta_puntualidad.porcentaje) || 95;
 
 async function cargarInforme() {
   if (!S.inf.mes) { const ms = mesesDisponibles(); S.inf.mes = Number(fechaEn(miTz()).slice(8)) <= 5 ? ms[1] : ms[0]; }
   if (!esGerencia()) S.inf.sede = P().sede_id;
-  const [y, m] = S.inf.mes.split('-').map(Number), desde = `${S.inf.mes}-01`, hasta = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  const { desde, hasta } = periodo();
   const [malla, marcas, ausR] = await Promise.all([
     mallaEfectiva(desde, hasta),
     todas(() => sb.from('marcas').select('persona_id,fecha,tipo,hora').gte('fecha', desde).lte('fecha', hasta).order('fecha')),
@@ -903,7 +914,7 @@ function calcularInforme() {
     if (!ids.has(r.persona_id)) continue;
     const x = persona(r.persona_id), t = turno(r.turno_id), hoy = fechaEn(sede(x.sede_id).zona_horaria);
     if (!t || !t.entrada || r.fecha >= hoy) continue;              // solo días cerrados con horario
-    const s2 = st[x.id], dia = Number(r.fecha.slice(8)); porDia[dia] = porDia[dia] || [];
+    const s2 = st[x.id], dia = r.fecha; porDia[dia] = porDia[dia] || [];
     const aus = D.ausencias.find(a => a.persona_id === x.id && a.desde <= r.fecha && r.fecha <= a.hasta);
     if (aus) { s2.just++; s2.detalle.push({ f: r.fecha, txt: TIPOS[aus.tipo].estado, cls: 'info' }); continue; }
     const mk = marcasDe[x.id + '|' + r.fecha] || {};
@@ -917,13 +928,13 @@ function calcularInforme() {
     }
     if (mk.salida != null) { const d = mk.salida - toMin(t.salida); if (d < 0) { s2.temp++; s2.detalle.push({ f: r.fecha, txt: `Salió ${-d} min antes`, cls: 'warn' }); } else if (d > 30) s2.extra += d; }
   }
-  const coms = S.com.lista.filter(c => c.requiere_confirmacion && c.creado.slice(0, 7) === S.inf.mes).map(c => {
+  const coms = S.com.lista.filter(c => c.requiere_confirmacion && (c => { const f = fechaEn(miTz(), new Date(c.creado)); return f >= D.desde && f <= D.hasta; })(c)).map(c => {
     const dest = destinatarios(c).filter(x => ids.has(x.id));
     return { c, dest, conf: dest.filter(x => leyo(c, x.id)), faltan: dest.filter(x => !leyo(c, x.id)) };
   }).filter(x => x.dest.length);
   for (const x of coms) for (const p of x.faltan) st[p.id].sinConf++;
   const lista = Object.values(st), tot = k => lista.reduce((a, b) => a + b[k], 0);
-  const dias = Object.keys(porDia).map(Number).sort((a, b) => a - b);
+  const dias = Object.keys(porDia).sort();
   return { lista, tot, porDia, dias, coms };
 }
 function graficaDias(I) {
@@ -931,30 +942,32 @@ function graficaDias(I) {
   const vals = ds.map(d => I.porDia[d].length), max = Math.max(4, ...vals), paso = max <= 6 ? 1 : max <= 12 ? 2 : 5, top = Math.ceil(max / paso) * paso;
   const yv = v => Tp + ih - (v / top) * ih;
   let g = '<g class="grid">'; for (let v = 0; v <= top; v += paso) g += `<line x1="${L}" x2="${W - R}" y1="${yv(v)}" y2="${yv(v)}"/><text x="${L - 8}" y="${yv(v) + 4}" text-anchor="end">${v}</text>`; g += '</g>';
-  const [y, m] = S.inf.mes.split('-').map(Number);
   const barras = ds.map((d, i) => {
     const v = vals[i], x = L + i * bw, w = Math.max(2, bw - 2), h = ih * v / top, yy = Tp + ih - h, r = Math.min(4, h, w / 2);
     const path = v ? `M${x + 1},${Tp + ih} V${yy + r} Q${x + 1},${yy} ${x + 1 + r},${yy} H${x + 1 + w - r} Q${x + 1 + w},${yy} ${x + 1 + w},${yy + r} V${Tp + ih} Z` : '';
-    const lbl = new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 1 || i === 0;
-    return `<g data-dia="${d}"><rect class="hit" x="${x}" y="${Tp}" width="${bw}" height="${ih}"/>${v ? `<path class="bar" d="${path}"/>` : ''}${lbl ? `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${d}</text>` : ''}</g>`;
+    // Etiqueta el primer día y cada lunes; si cambia el mes, se agrega el mes ("1 nov").
+    const lbl = new Date(d + 'T12:00:00Z').getUTCDay() === 1 || i === 0, nuevoMes = i === 0 || ds[i - 1].slice(0, 7) !== d.slice(0, 7);
+    return `<g data-dia="${d}"><rect class="hit" x="${x}" y="${Tp}" width="${bw}" height="${ih}"/>${v ? `<path class="bar" d="${path}"/>` : ''}${lbl || nuevoMes ? `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${nuevoMes && i > 0 ? fechaMes(d) : Number(d.slice(8))}</text>` : ''}</g>`;
   }).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Llegadas tarde por día del mes">${g}<line x1="${L}" x2="${W - R}" y1="${Tp + ih}" y2="${Tp + ih}" stroke="var(--blue-200)"/>${barras}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Llegadas tarde por día">${g}<line x1="${L}" x2="${W - R}" y1="${Tp + ih}" y2="${Tp + ih}" stroke="var(--blue-200)"/>${barras}</svg>`;
 }
 function informesView() {
   const D = S.inf.datos; if (!D) return '<div class="cargando">Cargando el informe…</div>';
-  const I = calcularInforme(), L = I.lista, mes = nombreMes(S.inf.mes);
+  const I = calcularInforme(), L = I.lista, mes = periodo().titulo;
   const dias = I.tot('dias'), tardes = I.tot('tardes'), punt = dias ? Math.round((1 - tardes / dias) * 1000) / 10 : 0;
   const pc = x => x.dias ? Math.round((1 - x.tardes / x.dias) * 100) : 0, pcCls = v => v >= meta() ? 'ok' : v >= meta() - 10 ? 'warn' : 'bad';
   const opt = (arr, v) => arr.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const filtros = `<div class="filters">
-    <div class="field"><label for="iMes">Mes</label><select id="iMes">${opt(mesesDisponibles().map(k => [k, nombreMes(k).replace(/^./, c => c.toUpperCase())]), S.inf.mes)}</select></div>
+    <div class="field"><label for="iMes">Período</label><select id="iMes">${opt([...mesesDisponibles().map(k => [k, nombreMes(k).replace(/^./, c => c.toUpperCase())]), ['rango', 'Rango de fechas…']], S.inf.mes)}</select></div>
+    ${S.inf.mes === 'rango' ? `<div class="field"><label for="iDesde">Desde</label><input type="date" id="iDesde" value="${S.inf.desde || ''}" max="${fechaEn(miTz())}"></div>
+      <div class="field"><label for="iHasta">Hasta</label><input type="date" id="iHasta" value="${S.inf.hasta || ''}" max="${fechaEn(miTz())}"></div>` : ''}
     ${esGerencia() ? `<div class="field"><label for="iSede">Sede</label><select id="iSede">${opt([[0, 'Las dos sedes'], ...S.sedes.map(x => [x.id, x.nombre])], S.inf.sede)}</select></div>`
       : `<div class="field"><label>Sede</label><select disabled><option>${esc(sede(P().sede_id).nombre)}</option></select></div>`}
     <div class="field"><label for="iArea">Área</label><select id="iArea">${opt([[0, 'Todas'], ...S.areas.map(a => [a.id, a.nombre])], S.inf.area)}</select></div>
     <span style="flex:1"></span><button class="btn ghost" type="button" data-accion="exportar" ${L.length ? '' : 'disabled'}>${ico('file')} Exportar a Excel</button></div>`;
-  const head = `<div class="hello"><div><div class="eyebrow">Intranet · informes de asistencia</div><h1>Asistencia de <em>${esc(mes)}</em></h1>
+  const head = `<div class="hello"><div><div class="eyebrow">Intranet · informes de asistencia</div><h1>Asistencia ${S.inf.mes === 'rango' ? 'del' : 'de'} <em>${esc(mes)}</em></h1>
     <p>${S.inf.sede ? `Sede ${esc(sede(S.inf.sede).nombre)}` : 'Las dos sedes'}${S.inf.area ? ` · ${esc(area(S.inf.area).nombre)}` : ''}, comparado con la malla de cada día. Solo cuentan los días ya cerrados.</p></div></div>`;
-  if (!I.dias.length && !I.coms.length) return head + filtros + `<div class="card vacio">No hay jornadas programadas en la malla para ${esc(mes)} todavía. El informe se llena a medida que las directoras publican la malla y el equipo marca.</div>`;
+  if (!I.dias.length && !I.coms.length) return head + filtros + `<div class="card vacio">No hay jornadas programadas en la malla para ese período todavía. El informe se llena a medida que las directoras publican la malla y el equipo marca.</div>`;
   const kpi = (c, v, l, sub, i) => `<div class="card kpi"><span class="sq ${c}">${ico(i)}</span><div><b class="num">${v}</b><span>${l}</span>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
   const rk = L.filter(x => x.tardes).sort((a, b) => b.minT - a.minT || b.tardes - a.tardes).slice(0, 8), maxR = rk.length ? rk[0].minT : 1;
   const sel = L.find(x => x.p.id === S.inf.sel);
@@ -976,7 +989,7 @@ function informesView() {
     <div class="grid-rep">
       <section class="card chartbox"><h3>Llegadas tarde por día</h3><div class="sub">Pasa el cursor sobre un día para ver quién llegó tarde.</div>
         <div class="chart" id="chartDias">${I.dias.length ? graficaDias(I) : '<p class="hint">Sin días cerrados con horario.</p>'}</div><div class="tip" id="tip" hidden></div></section>
-      <section class="card rankbox"><h3>¿Quién llegó más tarde?</h3><div class="sub">Minutos de retraso acumulados en el mes. Toca un nombre para ver el detalle.</div>
+      <section class="card rankbox"><h3>¿Quién llegó más tarde?</h3><div class="sub">Minutos de retraso acumulados en el período. Toca un nombre para ver el detalle.</div>
         <div class="rank">${rk.length ? rk.map((x, i) => `<button type="button" data-selinf="${x.p.id}" class="${S.inf.sel === x.p.id ? 'sel' : ''}"><span class="pos">${i + 1}</span><span class="nm">${esc(x.p.nombre)}</span>
           <span class="track"><span class="fill" style="display:block;width:${Math.max(3, x.minT / maxR * 100)}%"></span></span><span class="val">${x.minT} min · ${x.tardes} ${x.tardes === 1 ? 'vez' : 'veces'}</span></button>`).join('')
           : '<p class="hint">Nadie llegó tarde este mes.</p>'}</div></section></div>
@@ -988,7 +1001,7 @@ function informesView() {
         ${I.coms.map(x => `<tr><td class="tit"><b>${esc(x.c.titulo)}</b><span class="hint">${esc(cuando(x.c.creado))} · Para: ${esc(paraTexto(x.c))}</span></td>
           <td><span class="num" style="font-weight:600;color:var(--navy)">${x.conf.length} de ${x.dest.length}</span><div class="bar" style="margin-top:6px"><span style="width:${Math.round(x.conf.length / x.dest.length * 100)}%"></span></div></td>
           <td>${x.faltan.length ? `<div class="falt">${x.faltan.map(p => `<span class="chip warn">${esc(p.nombre)}</span>`).join('')}</div>` : '<span class="chip ok">Todos confirmaron</span>'}</td></tr>`).join('')}</tbody></table></div>`
-        : `<div class="card vacio">En ${esc(mes)} no hubo comunicados con confirmación de lectura para este grupo.</div>`}</section>
+        : `<div class="card vacio">En ese período no hubo comunicados con confirmación de lectura para este grupo.</div>`}</section>
     <section style="margin-top:28px"><div class="sec-h"><h2>Detalle por persona</h2><span class="hint">Solo aparecen quienes tienen turnos en la malla del mes · toca una columna para ordenar o una fila para ver sus días</span></div>
       <div class="card tablewrap"><table><thead><tr><th>Persona</th><th class="n">Jornadas</th>${th('tardes', 'Llegadas tarde')}${th('minT', 'Min. tarde')}<th class="n">Promedio</th>${th('almL', 'Almuerzos largos')}${th('temp', 'Salidas antes')}${th('extra', 'Horas extra')}${th('aus', 'Sin marcar')}${th('just', 'Con permiso')}${th('sinConf', 'Comunicados sin confirmar')}${th('punt', 'Puntualidad')}</tr></thead><tbody>
         ${orden.map(x => `<tr class="clickable ${S.inf.sel === x.p.id ? 'hl' : ''}" data-selinf="${x.p.id}"><td><div class="person"><div class="avatar soft">${initials(x.p.nombre)}</div><div><b>${esc(x.p.nombre)}</b><small>${esc(area(x.p.area_id).nombre)} · ${esc(sede(x.p.sede_id).nombre)}</small></div></div></td>
@@ -1003,7 +1016,7 @@ function exportarInforme() {
     ...I.lista.map(x => [x.p.nombre, x.p.correo, sede(x.p.sede_id).nombre, area(x.p.area_id).nombre, x.dias, x.tardes, x.minT, x.tardes ? Math.round(x.minT / x.tardes) : 0, x.almL, x.temp, x.extra, x.aus, x.just, x.sinConf, pc(x)])];
   const csv = '﻿' + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  a.download = `asistencia-${S.inf.mes}${S.inf.sede ? '-' + slug(sede(S.inf.sede).nombre) : ''}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  a.download = `asistencia-${periodo().clave}${S.inf.sede ? '-' + slug(sede(S.inf.sede).nombre) : ''}.csv`; document.body.appendChild(a); a.click(); a.remove();
   toast('Informe descargado. Ábrelo con Excel.');
 }
 
@@ -1339,10 +1352,19 @@ document.addEventListener('change', async e => {
       el.value = ''; document.getElementById('borrador').innerHTML = borradorView(); return;
     }
     if (el.id === 'iMes' || el.id === 'iSede' || el.id === 'iArea') {
-      if (el.id === 'iMes') { S.inf.mes = el.value; S.inf.datos = null; render(); await cargarInforme(); }
+      if (el.id === 'iMes') {
+        if (el.value === 'rango' && !S.inf.desde) { const p = periodo(); S.inf.desde = p.desde; S.inf.hasta = p.hasta > fechaEn(miTz()) ? fechaEn(miTz()) : p.hasta; }
+        S.inf.mes = el.value; S.inf.datos = null; render(); await cargarInforme();
+      }
       if (el.id === 'iSede') S.inf.sede = Number(el.value);
       if (el.id === 'iArea') S.inf.area = Number(el.value);
       S.inf.sel = null; render(); return;
+    }
+    if (el.id === 'iDesde' || el.id === 'iHasta') {
+      if (!el.value) return;
+      S.inf[el.id === 'iDesde' ? 'desde' : 'hasta'] = el.value;
+      if (S.inf.desde && S.inf.hasta && (Date.parse(S.inf.hasta) - Date.parse(S.inf.desde)) / 864e5 > 366) { toast('El rango puede ser de máximo un año.'); return; }
+      S.inf.sel = null; S.inf.datos = null; render(); await cargarInforme(); render(); return;
     }
     if (el.id === 'asisDia') {
       if (!el.value) return;
@@ -1376,8 +1398,8 @@ document.addEventListener('mousemove', e => {
   document.querySelectorAll('#chartDias g.on').forEach(x => x !== g && x.classList.remove('on'));
   if (!g) { tip.hidden = true; return; }
   g.classList.add('on');
-  const d = Number(g.dataset.dia), lst = (calcularInforme().porDia[d] || []).slice().sort((a, b) => b.min - a.min);
-  tip.innerHTML = `<b>${esc(fechaLarga(`${S.inf.mes}-${String(d).padStart(2, '0')}`))}</b><br>${lst.length ? `${lst.length} ${lst.length === 1 ? 'llegada tarde' : 'llegadas tarde'}<br>${lst.map(x => `${esc(x.n)} · ${x.min} min`).join('<br>')}` : 'Nadie llegó tarde'}`;
+  const d = g.dataset.dia, lst = (calcularInforme().porDia[d] || []).slice().sort((a, b) => b.min - a.min);
+  tip.innerHTML = `<b>${esc(fechaLarga(d))}</b><br>${lst.length ? `${lst.length} ${lst.length === 1 ? 'llegada tarde' : 'llegadas tarde'}<br>${lst.map(x => `${esc(x.n)} · ${x.min} min`).join('<br>')}` : 'Nadie llegó tarde'}`;
   tip.hidden = false;
   const box = g.closest('.chartbox').getBoundingClientRect();
   let x = e.clientX - box.left + 14; if (x + 240 > box.width) x = e.clientX - box.left - 250;
