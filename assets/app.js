@@ -531,8 +531,10 @@ function turnosView() {
 }
 
 /* ── Asistencia de hoy (líderes) ── */
+// Día que se consulta: S.asisDia (AAAA-MM-DD) o, si no hay, hoy en la zona horaria de cada sede.
+const diaAsistencia = tz => S.asisDia || fechaEn(tz);
 async function cargarAsistencia() {
-  const fechas = [...new Set(S.sedes.map(s => fechaEn(s.zona_horaria)))];
+  const fechas = [...new Set(S.sedes.map(s => diaAsistencia(s.zona_horaria)))];
   const [malla, marcas] = await Promise.all([
     mallaEfectiva(fechas.slice().sort()[0], fechas.slice().sort().pop()).then(rs => rs.filter(r => fechas.includes(r.fecha))),
     q(sb.from('marcas').select('persona_id,fecha,tipo,hora').in('fecha', fechas))
@@ -542,7 +544,9 @@ async function cargarAsistencia() {
   S.asistencia = { malla, marcas, ausencias: aus || [] };
 }
 function estadoPersona(x) {
-  const tz = sede(x.sede_id).zona_horaria, hoy = fechaEn(tz), ahora = toMin(horaEn(tz));
+  // En días pasados el día ya cerró (cuenta como si fueran las 24:00); en días futuros aún no empieza.
+  const tz = sede(x.sede_id).zona_horaria, hoyReal = fechaEn(tz), hoy = diaAsistencia(tz);
+  const ahora = hoy < hoyReal ? 24 * 60 : hoy > hoyReal ? -1 : toMin(horaEn(tz));
   const r = S.asistencia.malla.find(y => y.persona_id === x.id && y.fecha === hoy), t = r ? turno(r.turno_id) : null;
   const m = Object.fromEntries(S.asistencia.marcas.filter(y => y.persona_id === x.id && y.fecha === hoy).map(y => [y.tipo, toMin(horaEn(tz, new Date(y.hora)))]));
   let est;
@@ -562,9 +566,15 @@ function asistenciaView() {
     if (v == null) return `<td><span class="hint num">${f.t && f.t[p.plan] ? hhmm(f.t[p.plan]) : ''}</span></td>`;
     const ev = evaluar(p.k, v, f.t, f.m); return `<td><b class="num" style="color:var(--navy)">${fmt(v)}</b>${ev && (ev[0] === 'warn' || ev[0] === 'info') ? ` <span class="chip ${ev[0]}">${ev[1]}</span>` : ''}</td>`; };
   const kpi = (c, n, l, i) => `<div class="card kpi"><span class="sq ${c}">${ico(i)}</span><div><b class="num">${n}</b><br><span>${l}</span></div></div>`;
-  return `<div class="hello"><div><div class="eyebrow">Intranet · hoy</div><h1>¿Quién está <em>trabajando hoy?</em></h1>
-      <p>${esGerencia() ? 'Las dos sedes' : `Sede ${esc(sede(P().sede_id).nombre)}`}, comparado con la malla de hoy.</p></div>
-      <button class="btn ghost" type="button" data-accion="recargarAsistencia">Actualizar</button></div>
+  const hoyR = fechaEn(miTz()), dia = S.asisDia || hoyR, esHoy = dia === hoyR;
+  return `<div class="hello"><div><div class="eyebrow">Intranet · asistencia${esHoy ? ' · hoy' : ''}</div>
+      <h1>${esHoy ? '¿Quién está <em>trabajando hoy?</em>' : `Asistencia del <em>${esc(fechaLarga(dia))}</em>`}</h1>
+      <p>${esGerencia() ? 'Las dos sedes' : `Sede ${esc(sede(P().sede_id).nombre)}`}, comparado con la malla de ${esHoy ? 'hoy' : 'ese día'}.</p></div>
+      <div class="weeknav"><button class="btn ghost sm" type="button" data-asisdia="-1" aria-label="Día anterior">‹ Anterior</button>
+        <input type="date" id="asisDia" value="${dia}" max="${sumarDias(hoyR, 31)}" aria-label="Elegir día">
+        <button class="btn ghost sm" type="button" data-asisdia="1" aria-label="Día siguiente">Siguiente ›</button>
+        ${esHoy ? '' : '<button class="btn ghost sm" type="button" data-asisdia="0">Hoy</button>'}
+        <button class="btn ghost sm" type="button" data-accion="recargarAsistencia">Actualizar</button></div></div>
     <div class="kpis">${kpi('ok', cnt('ok'), 'Al día', 'check')}${kpi('warn', cnt('warn'), 'Con novedad', 'alert')}${kpi('bad', cnt('bad'), 'Sin marcar entrada', 'x')}${kpi('mute', cnt('mute') + cnt('info'), 'Descanso o por llegar', 'moon')}</div>
     <div class="card tablewrap"><table><thead><tr><th>Persona</th><th>Turno</th><th>Entrada</th><th>Sale a almorzar</th><th>Regresa</th><th>Salida</th><th>Estado</th></tr></thead><tbody>
       ${filas.map(f => `<tr><td><div class="person"><div class="avatar soft">${initials(f.x.nombre)}</div><div><b>${esc(f.x.nombre)}</b><small>${esc(area(f.x.area_id).nombre)} · ${esc(sede(f.x.sede_id).nombre)}</small></div></div></td>
@@ -1235,6 +1245,12 @@ document.addEventListener('click', async e => {
     return;
   }
   if (a === 'recargarAsistencia') { await cargarAsistencia(); render(); return; }
+  if (b.dataset.asisdia) {
+    const hoyR = fechaEn(miTz()), n = Number(b.dataset.asisdia), nuevo = n === 0 ? hoyR : sumarDias(S.asisDia || hoyR, n);
+    S.asisDia = nuevo === hoyR ? null : nuevo; ocupado(b, true);
+    try { await cargarAsistencia(); } catch (err) { toast(errorTexto(err)); }
+    render(); return;
+  }
   if (a === 'ocultarClave') { S.equipo.claveNueva = null; render(); return; }
   if (b.dataset.copiar) {
     try { await navigator.clipboard.writeText(b.dataset.copiar); toast('Copiado. Pégalo en un mensaje privado.'); } catch (_) { toast('No se pudo copiar; selecciona el texto y cópialo a mano.'); }
@@ -1327,6 +1343,11 @@ document.addEventListener('change', async e => {
       if (el.id === 'iSede') S.inf.sede = Number(el.value);
       if (el.id === 'iArea') S.inf.area = Number(el.value);
       S.inf.sel = null; render(); return;
+    }
+    if (el.id === 'asisDia') {
+      if (!el.value) return;
+      S.asisDia = el.value === fechaEn(miTz()) ? null : el.value;
+      await cargarAsistencia(); render(); return;
     }
     if (el.id === 'mSede') { S.malla.sede = Number(el.value); render(); return; }
     if (el.id === 'tSede') { S.turnoSede = Number(el.value); render(); return; }
