@@ -163,3 +163,7 @@ table.malla select.shift { min-width: 92px; max-width: 220px; text-align-last: l
 .kproyecto { font-size: 11.5px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .kproyecto .pj-punto { width: 9px; height: 9px; border-radius: 3px; }
 .dato { min-height: 42px; display: flex; align-items: center; gap: 6px; padding: 0 2px; font-size: 15px; color: var(--ink); }
+.alerta.roja { background: #fdecea; border-color: #f2b8b5; border-left-color: #c62828; }
+.alerta.roja .sq { color: #c62828; }
+.alerta.roja > div > b { color: #b71c1c; }
+.tabs .badge.roja { background: #c62828; color: #fff; }

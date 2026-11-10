@@ -102,7 +102,7 @@ const S = {
   inf: { mes: null, desde: null, hasta: null, sede: 0, area: 0, orden: 'minT', sel: null, datos: null },
   com: { lista: [], imgs: {}, lect: [], filtro: 'todos', q: '', borrador: [], hl: null },
   lb: null,
-  pj: { lista: [], tareas: [], items: [], coms: [], actual: null, abierta: null, editProyecto: null, nuevo: false, nuevaCol: null, verArch: false, filtro: '', filtroResp: '', drag: null, tengo: false, extEdit: null, extEditP: null, filtroPj: '' },
+  pj: { lista: [], tareas: [], items: [], coms: [], actual: null, abierta: null, editProyecto: null, nuevo: false, nuevaCol: null, verArch: false, filtro: '', filtroResp: '', drag: null, tengo: false, vencidas: 0, extEdit: null, extEditP: null, filtroPj: '' },
   sol: { lista: [], adj: {}, revisores: [], tipo: 'vacaciones', borrador: [], ausencias: [] }
 };
 
@@ -201,7 +201,7 @@ async function cargarUsuario(user) {
     if (user.user_metadata && user.user_metadata.debe_cambiar_contrasena) { S.pantalla = 'clave'; render(); return; }
     if (!perfil.acepto_datos) { S.pantalla = 'datos'; render(); return; }
     S.personas = await q(sb.from('perfiles').select('id,nombre,correo,sede_id,area_id,rol,es_admin,activo').order('nombre'));
-    if (!esGerencia()) { try { S.pj.tengo = (await q(sb.from('tareas').select('id').eq('responsable_id', perfil.id).limit(1))).length > 0; } catch (_) { S.pj.tengo = false; } }
+    await contarTareas();
     S.pantalla = 'app'; S.view = 'inicio';
     await cargarInicio(); render();
   } catch (e) { S.pantalla = 'login'; S.error = errorTexto(e); render(); }
@@ -272,7 +272,7 @@ function appView() {
   const rol = ROLES[p.rol] + (p.es_admin ? ' · administración' : '');
   return `<header class="top"><div class="wrap">
       <div class="brand"><img src="assets/logo-wakanda.png" alt=""><span>Wakanda Travel</span></div>
-      <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}${k === 'comunicados' && pendCom ? `<span class="badge" aria-label="${pendCom} sin confirmar">${pendCom}</span>` : ''}${k === 'solicitudes' && pendSol ? `<span class="badge" aria-label="${pendSol} por revisar">${pendSol}</span>` : ''}</button>`).join('')}</nav>
+      <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}${k === 'comunicados' && pendCom ? `<span class="badge" aria-label="${pendCom} sin confirmar">${pendCom}</span>` : ''}${k === 'proyectos' && S.pj.vencidas ? `<span class="badge roja" aria-label="${S.pj.vencidas} vencidas">${S.pj.vencidas}</span>` : ''}${k === 'solicitudes' && pendSol ? `<span class="badge" aria-label="${pendSol} por revisar">${pendSol}</span>` : ''}</button>`).join('')}</nav>
       <div class="menu"><button type="button" data-accion="menu" aria-expanded="${S.menu}" aria-label="Menú de ${esc(p.nombre)}"><span class="avatar">${initials(p.nombre)}</span></button>
         ${S.menu ? `<div class="menu-pop"><div class="who"><b>${esc(p.nombre)}</b>${esc(rol)} · ${esc(sede(p.sede_id).nombre)}</div>
           <button type="button" data-view="guia">Guía de uso</button><button type="button" data-view="clave">Cambiar contraseña</button><button type="button" data-accion="salir">Cerrar sesión</button></div>` : ''}</div>
@@ -328,6 +328,7 @@ function guiaView() {
       <li><b>Arrastra</b> las tarjetas de una columna a otra a medida que avanzan. Al pasar a <b>Hecho</b> quedan en 100 %.</li>
       <li>Haz clic en una tarjeta para abrirla: responsable, prioridad, fecha límite, <b>porcentaje de avance</b>, descripción, <b>lista de pasos</b> y <b>seguimiento</b> (avances, acuerdos o novedades con fecha y autor).</li></ol>
       <p><b>Responsables:</b> puedes asignar a cualquier persona de la intranet o elegir <b>Externo</b> y escribir el nombre (un proveedor, una agencia, un consultor). Quien recibe una tarjeta y tiene cuenta en la intranet ve la pestaña <b>Mis tareas</b> con solo sus tarjetas: puede moverlas de columna, actualizar el avance, marcar y agregar pasos y registrar seguimiento, pero no cambiar el título, las fechas ni el responsable, ni ver el resto del proyecto.</p>
+      <p><b>Avisos por correo:</b> al asignar una tarjeta a alguien con cuenta, le llega un correo con la tarea. Cada mañana la intranet revisa las tarjetas vencidas y envía un correo con alerta en rojo a su responsable, con copia a quien creó la tarjeta (una sola vez; si cambias la fecha límite, vuelve a avisar cuando venza la nueva). Los responsables externos no reciben correo.</p>
       <p>El avance del proyecto es el promedio del avance de sus tarjetas. Las tarjetas con la fecha límite vencida se marcan en rojo. Los proyectos terminados se pueden <b>archivar</b> desde <b>Editar proyecto</b>.</p>` },
     { id: 'g-cuentas', t: 'Para supervisores: cuentas y malla', si: P().rol === 'supervisor' && !P().es_admin, html: `
       <p>Como supervisor manejas las cuentas de los colaboradores desde la pestaña <b>Equipo</b>.</p>
@@ -341,7 +342,8 @@ function guiaView() {
       <p>Si la gerencia te asigna una actividad de un proyecto, aparece la pestaña <b>Mis tareas</b> con tus tarjetas.</p>
       <ul><li><b>Arrastra</b> cada tarjeta a la columna que corresponda: Por hacer, En curso, En revisión o Hecho.</li>
       <li>Ábrela para <b>actualizar el porcentaje de avance</b>, marcar o agregar <b>pasos</b> y escribir el <b>seguimiento</b> (qué hiciste, qué falta, novedades).</li>
-      <li>El título, las fechas y la prioridad los define la gerencia.</li></ul>` },
+      <li>El título, las fechas y la prioridad los define la gerencia.</li>
+      <li>Te llega un <b>correo</b> cuando te asignan una tarea, y otro con <b>alerta en rojo</b> si se vence sin estar en Hecho. En la intranet también verás un aviso rojo en Inicio.</li></ul>` },
     { id: 'g-faq', t: 'Preguntas frecuentes', html: `
       <p><b>Olvidé mi contraseña.</b> Pídele a la gerencia que la restablezca; recibirás una temporal.</p>
       <p><b>¿Puedo marcar desde el celular?</b> ${S.config.validar_ip && S.config.validar_ip.activo ? 'No. Solo se puede marcar desde la oficina.' : 'Pronto solo se podrá marcar desde la oficina y tu computador asignado. Acostúmbrate a marcar desde tu puesto.'}</p>
@@ -387,7 +389,7 @@ function inicioView() {
   return `<div class="hello"><div><div class="eyebrow">Intranet · ${esc(fechaLarga(S.hoy.fecha))}</div>
       <h1>${saludo}, <em>${esc(p.nombre.split(' ')[0])}</em></h1>
       <p>${esc(area(p.area_id).nombre)} · Sede ${esc(sede(p.sede_id).nombre)}. Marca tu jornada y abre tus herramientas desde aquí.</p></div><button class="btn ghost sm" type="button" data-view="guia">¿Dudas? Guía de uso</button></div>
-    ${avisoLectura()}
+    ${alertaVencidas()}${avisoLectura()}
     <div class="grid-home"><div class="col">${paseView()}
       <section><div class="sec-h"><h2>Herramientas</h2><span class="hint">Se abren en una pestaña nueva</span></div>${herramientasView()}</section></div>
       <div class="col">${comunicadosMini()}${moduloSol() ? misSolicitudesMini() : ''}${semanaView()}</div></div>`;
@@ -1104,6 +1106,34 @@ async function funcionCuentas(cuerpo) {
 async function recargarPersonas() { S.personas = await q(sb.from('perfiles').select('id,nombre,correo,sede_id,area_id,rol,es_admin,activo').order('nombre')); }
 
 /* ── Proyectos: tablero tipo kanban (solo gerencia) ── */
+// Cuántas tarjetas tiene la persona (para mostrar Mis tareas) y cuántas están vencidas (alerta roja).
+// A la gerencia le cuentan las vencidas de todos los proyectos activos; a los demás, solo las suyas.
+async function contarTareas() {
+  try {
+    if (esGerencia()) {
+      const [ts, ps] = await Promise.all([q(sb.from('tareas').select('id,proyecto_id').lt('fecha_limite', fechaEn(miTz())).neq('columna', 'hecho')), q(sb.from('proyectos').select('id').eq('archivado', true))]);
+      S.pj.vencidas = ts.filter(t => !ps.some(p => p.id === t.proyecto_id)).length;
+    } else {
+      const ts = await q(sb.from('tareas').select('id,columna,fecha_limite').eq('responsable_id', P().id));
+      S.pj.tengo = ts.length > 0; S.pj.vencidas = ts.filter(vencida).length;
+    }
+  } catch (_) { /* si falla, la intranet sigue funcionando sin la alerta */ }
+}
+function alertaVencidas(conBoton = true) {
+  const n = S.pj.vencidas; if (!n || (!esGerencia() && !S.pj.tengo)) return '';
+  const ger = esGerencia();
+  return `<div class="alerta roja" role="alert"><span class="sq">${ico('alert')}</span><div><b>${ger ? `Hay ${n} ${n === 1 ? 'actividad vencida' : 'actividades vencidas'} en los proyectos` : `Tienes ${n} ${n === 1 ? 'tarea vencida' : 'tareas vencidas'}`}</b>
+    <span>${ger ? 'Su fecha límite ya pasó y todavía no están en Hecho. Aparecen con borde rojo en el tablero.' : 'Su fecha límite ya pasó. Actualiza el avance o escribe en el seguimiento qué falta y cuándo quedará lista.'}</span></div>
+    ${conBoton ? `<button type="button" class="btn sm danger" data-view="proyectos">${ger ? 'Ver proyectos' : 'Ver mis tareas'}</button>` : ''}</div>`;
+}
+async function avisarAsignacion(t) {
+  const r = persona(t.responsable_id); if (!r || r.id === P().id) return;
+  try {
+    const out = await sb.functions.invoke('avisos-proyectos', { body: { accion: 'asignada', tarea_id: t.id } });
+    if (out.error || (out.data && out.data.error)) throw new Error((out.data && out.data.error) || out.error.message);
+    if (out.data && out.data.enviado) toast(`Le enviamos un correo a ${r.nombre.split(' ')[0]} con la tarea.`);
+  } catch (err) { toast(`La tarea quedó asignada, pero no se pudo enviar el correo de aviso.`); console.warn('avisos-proyectos', err); }
+}
 const COLUMNAS = [['pendiente', 'Por hacer'], ['en_curso', 'En curso'], ['revision', 'En revisión'], ['hecho', 'Hecho']];
 const PRIORIDAD = { alta: ['bad', 'Alta'], media: ['warn', 'Media'], baja: ['mute', 'Baja'] };
 const COLORES_PJ = ['f0', 'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9'];
@@ -1126,7 +1156,8 @@ async function cargarProyectos() {
     todas(() => sb.from('tareas').select('*').order('proyecto_id').order('orden').order('id'))
   ]);
   S.pj.lista = lista; S.pj.tareas = tareas;
-  if (!esGerencia()) { S.pj.tengo = tareas.length > 0; S.pj.actual = null; }
+  if (!esGerencia()) { S.pj.tengo = tareas.length > 0; S.pj.actual = null; S.pj.vencidas = tareas.filter(vencida).length; }
+  else S.pj.vencidas = tareas.filter(t => vencida(t) && lista.some(p => p.id === t.proyecto_id && !p.archivado)).length;
   if (S.pj.actual && !lista.some(p => p.id === S.pj.actual)) S.pj.actual = null;
   const ids = !esGerencia() ? tareas.map(t => t.id) : S.pj.actual ? tareasDe(S.pj.actual).map(t => t.id) : [];
   [S.pj.items, S.pj.coms] = ids.length ? await Promise.all([
@@ -1136,6 +1167,7 @@ async function cargarProyectos() {
 }
 function proyectosView() {
   if (!esGerencia()) return misTareasView() + modalTarjetaView();
+  if (!S.pj.actual && S.pj.vencidas) return listaProyectosView().replace('<div class="kpis">', `${alertaVencidas(false)}<div class="kpis">`) + modalTarjetaView() + modalProyectoView();
   return (S.pj.actual ? tableroView() : listaProyectosView()) + modalTarjetaView() + modalProyectoView();
 }
 function listaProyectosView() {
@@ -1216,6 +1248,7 @@ function misTareasView() {
       <div class="klista">${ts.filter(t => t.columna === k).sort((a, b) => a.orden - b.orden || a.id - b.id).map(t => tarjetaKanban(t, true)).join('') || '<p class="hint" style="margin:4px">—</p>'}</div></section>`;
   return `<div class="hello"><div><div class="eyebrow">Proyectos</div><h1>Mis <em>tareas</em></h1>
       <p>Estas son las actividades de proyectos que la gerencia te asignó. Muévelas de columna, actualiza el avance, marca los pasos y registra el seguimiento.</p></div></div>
+    ${alertaVencidas(false)}
     <div class="toolbar" style="margin:0 0 16px"><select id="pjFiltroPj" aria-label="Filtrar por proyecto"><option value="">Todos los proyectos</option>${S.pj.lista.map(p => `<option value="${p.id}" ${fp === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select>
       <span class="hint">${abiertas} abierta${abiertas === 1 ? '' : 's'}${venc ? ` · <b style="color:var(--bad)">${venc} vencida${venc === 1 ? '' : 's'}</b>` : ''} · Arrastra las tarjetas entre columnas o ábrelas para ver el detalle.</span></div>
     ${S.pj.tareas.length ? `<div class="kanban">${COLUMNAS.map(col).join('')}</div>` : '<div class="card vacio">No tienes tareas asignadas en este momento.</div>'}`;
@@ -1580,7 +1613,8 @@ document.addEventListener('change', async e => {
       if (campo === 'columna') { await pjMover(t.id, v); return; }
       if (campo === 'responsable_id') {
         if (v === '__ext') { S.pj.extEdit = t.id; render(); document.querySelector('[data-tcampo=responsable_externo]')?.focus(); return; }
-        S.pj.extEdit = null; await pjGuardar('tareas', t.id, { responsable_id: v || null, responsable_externo: null, actualizado: new Date().toISOString() }); return;
+        S.pj.extEdit = null; await pjGuardar('tareas', t.id, { responsable_id: v || null, responsable_externo: null, actualizado: new Date().toISOString() });
+        if (v) await avisarAsignacion({ ...t, responsable_id: v }); return;
       }
       if (campo === 'responsable_externo') {
         v = v.trim(); S.pj.extEdit = null;

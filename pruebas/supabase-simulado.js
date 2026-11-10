@@ -40,7 +40,7 @@
   DB.perfiles.filter(x => x.id !== ADMIN).forEach(x => { const M = DB.turnos.find(t => t.sede_id === x.sede_id && t.codigo === 'M'), Sa = DB.turnos.find(t => t.sede_id === x.sede_id && t.codigo === 'S'); for (let d = 1; d <= 5; d++) DB.horario_base.push({ persona_id: x.id, dia: d, turno_id: M.id }); DB.horario_base.push({ persona_id: x.id, dia: 6, turno_id: Sa.id }); });
   DB.proyectos.push({ id: 1, nombre: 'Nueva página web', descripcion: 'Rediseño del sitio de la agencia', color: 'f3', responsable_id: ADMIN, responsable_externo: null, fecha_inicio: null, fecha_fin: '2027-03-31', archivado: false, orden: 0, creado: new Date().toISOString() });
   [['Fotos de destinos', '00000000-0000-0000-0000-000000000110', null, 'en_curso', 30], ['Desarrollo del sitio', null, 'Agencia Pixel', 'pendiente', 0], ['Textos de paquetes', '00000000-0000-0000-0000-000000000110', null, 'pendiente', 0], ['Aprobar diseño', ADMIN, null, 'revision', 80]]
-    .forEach(([titulo, rid, ext, columna, avance], i) => DB.tareas.push({ id: i + 1, proyecto_id: 1, titulo, descripcion: null, columna, orden: i, responsable_id: rid, responsable_externo: ext, fecha_inicio: null, fecha_limite: i === 0 ? '2026-12-15' : null, prioridad: 'media', avance, creado: new Date().toISOString(), actualizado: new Date().toISOString() }));
+    .forEach(([titulo, rid, ext, columna, avance], i) => DB.tareas.push({ id: i + 1, proyecto_id: 1, titulo, descripcion: null, columna, orden: i, responsable_id: rid, responsable_externo: ext, fecha_inicio: null, fecha_limite: i === 0 ? '2026-12-15' : i === 2 ? '2026-11-01' : null, prioridad: 'media', avance, creado: new Date().toISOString(), actualizado: new Date().toISOString() }));
   let sesion = null, meta = { debe_cambiar_contrasena: true };
   class Q {
     constructor(t) { this.t = t; this.f = []; this.op = 'select'; this.one = false; }
@@ -49,6 +49,7 @@
     insert(v) { this.op = 'insert'; this.v = [].concat(v); return this; }
     eq(c, v) { this.f.push(r => String(r[c]) === String(v)); return this; }
     gte(c, v) { this.f.push(r => r[c] >= v); return this; } lte(c, v) { this.f.push(r => r[c] <= v); return this; }
+    lt(c, v) { this.f.push(r => r[c] != null && r[c] < v); return this; } neq(c, v) { this.f.push(r => String(r[c]) !== String(v)); return this; }
     in(c, vs) { this.f.push(r => vs.includes(r[c])); return this; }
     maybeSingle() { this.one = true; return this; }
     upsert(v, o) { this.op = 'upsert'; this.v = [].concat(v); this.k = ((o && o.onConflict) || 'persona_id,fecha').split(','); return this; }
@@ -115,6 +116,7 @@
       createSignedUrls: async rutas => ({ data: rutas.map(r => ({ path: r, signedUrl: (window.__archivos || {})[r] })), error: null }),
       remove: async () => ({ data: [], error: null }) }) },
     functions: { invoke: async (n, { body }) => {
+      if (n === 'avisos-proyectos') { window.__avisos = (window.__avisos || []).concat(body); return { data: { enviado: true }, error: null }; }
       if (body.accion === 'editar') { if (DB.perfiles.some(x => x.correo === body.correo && x.id !== body.id)) return { data: { error: 'Ya existe una cuenta con ese correo.' }, error: null }; Object.assign(DB.perfiles.find(x => x.id === body.id), { nombre: body.nombre, correo: body.correo }); return { data: { ok: true }, error: null }; }
       if (body.accion === 'crear') { DB.perfiles.push({ id: uid(), nombre: body.nombre, correo: body.correo, sede_id: body.sede_id, area_id: body.area_id, rol: body.rol, es_admin: false, activo: true, acepto_datos: null }); return { data: { ok: true }, error: null }; }
       if (body.accion === 'desactivar' || body.accion === 'reactivar') { DB.perfiles.find(p => p.id === body.id).activo = body.accion === 'reactivar'; return { data: { ok: true }, error: null }; }
