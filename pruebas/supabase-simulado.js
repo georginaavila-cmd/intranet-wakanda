@@ -11,7 +11,7 @@
       { id: 2, nombre: 'KAM 360', descripcion: 'Equipo comercial.', icono: 'target', pie: 'Comercial', url: 'https://example.com', orden: 2, activo: true }],
     configuracion: [{ clave: 'tolerancias', valor: { entrada_min: 5, almuerzo_min: 5 } }, { clave: 'validar_ip', valor: { activo: false } }, { clave: 'modulo_solicitudes', valor: { activo: false } }],
     perfiles: [{ id: ADMIN, nombre: 'Georgina Ávila', correo: 'georgina.avila@wakanda.travel', sede_id: 1, area_id: 1, rol: 'gerente', es_admin: true, activo: true, acepto_datos: null }],
-    malla: [], horario_base: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: []
+    malla: [], horario_base: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: [], proyectos: [], tareas: [], tarea_items: [], tarea_comentarios: []
   };
   let tid = 1;
   for (const s of [1, 2]) for (const [c, n, e, a, r, sa] of [['M', 'Mañana', '08:00:00', '12:30:00', '13:30:00', '17:30:00'], ['T', 'Tarde', '10:00:00', '14:00:00', '15:00:00', '19:00:00'], ['S', 'Sábado', '09:00:00', null, null, '13:00:00'], ['D', 'Descanso', null, null, null, null]])

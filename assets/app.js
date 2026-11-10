@@ -102,6 +102,7 @@ const S = {
   inf: { mes: null, desde: null, hasta: null, sede: 0, area: 0, orden: 'minT', sel: null, datos: null },
   com: { lista: [], imgs: {}, lect: [], filtro: 'todos', q: '', borrador: [], hl: null },
   lb: null,
+  pj: { lista: [], tareas: [], items: [], coms: [], actual: null, abierta: null, editProyecto: null, nuevo: false, nuevaCol: null, verArch: false, filtro: '', filtroResp: '', drag: null },
   sol: { lista: [], adj: {}, revisores: [], tipo: 'vacaciones', borrador: [], ausencias: [] }
 };
 
@@ -264,8 +265,9 @@ function appView() {
   if (esLider()) tabs.push(['asistencia', 'Asistencia'], ['informes', 'Informes']);
   if (moduloSol() || esGerencia()) tabs.push(['solicitudes', 'Solicitudes']);
   if (gestionaCuentas()) tabs.push(['equipo', 'Equipo']);
+  if (esGerencia()) tabs.push(['proyectos', 'Proyectos']);
   const pendSol = moduloSol() ? porRevisar().filter(x => puedeAprobar(x)).length : 0;
-  const vistas = { informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, guia: guiaView, clave: () => claveView(false) };
+  const vistas = { proyectos: proyectosView, informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, guia: guiaView, clave: () => claveView(false) };
   const rol = ROLES[p.rol] + (p.es_admin ? ' · administración' : '');
   return `<header class="top"><div class="wrap">
       <div class="brand"><img src="assets/logo-wakanda.png" alt=""><span>Wakanda Travel</span></div>
@@ -318,6 +320,13 @@ function guiaView() {
       <li><b>Rol Supervisor:</b> asígnalo a quien deba crear y administrar cuentas de colaboradores (por ejemplo, contabilidad). No le da acceso a informes, aprobaciones ni configuración.</li></ul>` : ''}
       <p><b>Solicitudes.</b> En <b>Solicitudes</b> activas o apagas el módulo para todo el equipo y asignas los <b>revisores</b>: quién puede ver, aprobar y rechazar, por sede y por tipo (por ejemplo, contabilidad para incapacidades). Las directoras solo revisan si las asignas. Nadie aprueba sus propias solicitudes.</p>
       <p><b>Informes.</b> Ves ambas sedes o una sola, con los indicadores del mes, la gráfica por día, el ranking de llegadas tarde y la confirmación de comunicados.</p>` },
+    { id: 'g-proyectos', t: 'Proyectos (tablero de gerencia)', si: esGerencia(), html: `
+      <p>La pestaña <b>Proyectos</b> solo la ve la gerencia. Sirve para planear y seguir los proyectos de la agencia, al estilo de un tablero de tarjetas.</p>
+      <ol><li><b>Nuevo proyecto:</b> nombre, descripción, responsable, fechas y un color para reconocerlo.</li>
+      <li>Dentro del proyecto hay cuatro columnas: <b>Por hacer, En curso, En revisión y Hecho</b>. Con <b>Agregar tarjeta</b> creas cada actividad.</li>
+      <li><b>Arrastra</b> las tarjetas de una columna a otra a medida que avanzan. Al pasar a <b>Hecho</b> quedan en 100 %.</li>
+      <li>Haz clic en una tarjeta para abrirla: responsable, prioridad, fecha límite, <b>porcentaje de avance</b>, descripción, <b>lista de pasos</b> y <b>seguimiento</b> (avances, acuerdos o novedades con fecha y autor).</li></ol>
+      <p>El avance del proyecto es el promedio del avance de sus tarjetas. Las tarjetas con la fecha límite vencida se marcan en rojo. Los proyectos terminados se pueden <b>archivar</b> desde <b>Editar proyecto</b>.</p>` },
     { id: 'g-cuentas', t: 'Para supervisores: cuentas y malla', si: P().rol === 'supervisor' && !P().es_admin, html: `
       <p>Como supervisor manejas las cuentas de los colaboradores desde la pestaña <b>Equipo</b>.</p>
       <ul><li><b>Crear:</b> nombre, correo corporativo, sede y área. La contraseña temporal se muestra <b>una sola vez</b>: cópiala y entrégala en privado. La persona la cambia al primer ingreso.</li>
@@ -1087,6 +1096,159 @@ async function funcionCuentas(cuerpo) {
 }
 async function recargarPersonas() { S.personas = await q(sb.from('perfiles').select('id,nombre,correo,sede_id,area_id,rol,es_admin,activo').order('nombre')); }
 
+/* ── Proyectos: tablero tipo kanban (solo gerencia) ── */
+const COLUMNAS = [['pendiente', 'Por hacer'], ['en_curso', 'En curso'], ['revision', 'En revisión'], ['hecho', 'Hecho']];
+const PRIORIDAD = { alta: ['bad', 'Alta'], media: ['warn', 'Media'], baja: ['mute', 'Baja'] };
+const COLORES_PJ = ['f0', 'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9'];
+const avanceTarea = t => t.columna === 'hecho' ? 100 : (t.avance || 0);
+const tareasDe = pid => S.pj.tareas.filter(t => t.proyecto_id === pid);
+const avanceProyecto = pid => { const ts = tareasDe(pid); return ts.length ? Math.round(ts.reduce((a, t) => a + avanceTarea(t), 0) / ts.length) : 0; };
+const vencida = t => t.fecha_limite && t.columna !== 'hecho' && t.fecha_limite < fechaEn(miTz());
+const fechaCortaPj = d => d ? `${Number(d.slice(8))} ${MESES[Number(d.slice(5, 7)) - 1].slice(0, 3)}${d.slice(0, 4) !== fechaEn(miTz()).slice(0, 4) ? ' ' + d.slice(0, 4) : ''}` : '';
+const barraAvance = (v, grande) => `<div class="pj-barra ${grande ? 'grande' : ''}" role="progressbar" aria-valuenow="${v}" aria-valuemin="0" aria-valuemax="100"><span style="width:${v}%"></span></div>`;
+const opcionesPersonas = (sel, vacio = 'Sin responsable') => `<option value="">${vacio}</option>` + S.personas.filter(x => x.activo || x.id === sel).map(x => `<option value="${x.id}" ${x.id === sel ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('');
+
+async function cargarProyectos() {
+  const [lista, tareas] = await Promise.all([
+    q(sb.from('proyectos').select('*').order('archivado').order('orden').order('id')),
+    todas(() => sb.from('tareas').select('*').order('proyecto_id').order('orden').order('id'))
+  ]);
+  S.pj.lista = lista; S.pj.tareas = tareas;
+  if (S.pj.actual && !lista.some(p => p.id === S.pj.actual)) S.pj.actual = null;
+  const ids = S.pj.actual ? tareasDe(S.pj.actual).map(t => t.id) : [];
+  [S.pj.items, S.pj.coms] = ids.length ? await Promise.all([
+    q(sb.from('tarea_items').select('*').in('tarea_id', ids).order('orden').order('id')),
+    q(sb.from('tarea_comentarios').select('*').in('tarea_id', ids).order('creado'))
+  ]) : [[], []];
+}
+function proyectosView() {
+  return (S.pj.actual ? tableroView() : listaProyectosView()) + modalTarjetaView() + modalProyectoView();
+}
+function listaProyectosView() {
+  const visibles = S.pj.lista.filter(p => S.pj.verArch ? p.archivado : !p.archivado);
+  const activos = S.pj.lista.filter(p => !p.archivado), tAct = S.pj.tareas.filter(t => activos.some(p => p.id === t.proyecto_id));
+  const abiertas = tAct.filter(t => t.columna !== 'hecho').length, venc = tAct.filter(vencida).length;
+  const prom = activos.length ? Math.round(activos.reduce((a, p) => a + avanceProyecto(p.id), 0) / activos.length) : 0;
+  const kpi = (c, v, l, i) => `<div class="card kpi"><span class="sq ${c}">${ico(i)}</span><div><b class="num">${v}</b><br><span>${l}</span></div></div>`;
+  const tarjeta = p => {
+    const ts = tareasDe(p.id), av = avanceProyecto(p.id), resp = persona(p.responsable_id), nv = ts.filter(vencida).length;
+    return `<button type="button" class="card pj-card" data-pjabrir="${p.id}"><span class="pj-banda ${p.color}"></span>
+      <h3>${esc(p.nombre)}</h3>${p.descripcion ? `<p>${esc(p.descripcion.length > 120 ? p.descripcion.slice(0, 117) + '…' : p.descripcion)}</p>` : ''}
+      <div class="pj-meta">${p.fecha_inicio || p.fecha_fin ? `<span>${ico('clock')} ${esc(fechaCortaPj(p.fecha_inicio) || '…')} – ${esc(fechaCortaPj(p.fecha_fin) || '…')}</span>` : ''}${resp ? `<span class="avatar soft" title="${esc(resp.nombre)}">${initials(resp.nombre)}</span>` : ''}</div>
+      <div class="pj-av"><b class="num">${av} %</b>${barraAvance(av)}</div>
+      <div class="pj-cuenta">${COLUMNAS.map(([k, l]) => `<span title="${l}">${l}: <b>${ts.filter(t => t.columna === k).length}</b></span>`).join('')}${nv ? `<span class="chip bad">${nv} vencida${nv === 1 ? '' : 's'}</span>` : ''}</div></button>`;
+  };
+  const form = S.pj.nuevo ? `<form class="card compose" id="fProyecto" novalidate style="margin-bottom:22px"><div class="form-grid">
+      <div class="field" style="grid-column:1/-1"><label for="pjNombre">Nombre del proyecto</label><input id="pjNombre" required maxlength="120" placeholder="Ej.: Lanzamiento de la nueva página web"></div>
+      <div class="field" style="grid-column:1/-1"><label for="pjDesc">Descripción u objetivo</label><textarea id="pjDesc" rows="2" placeholder="¿Qué se quiere lograr?"></textarea></div>
+      <div class="field"><label for="pjResp">Responsable</label><select id="pjResp">${opcionesPersonas(P().id)}</select></div>
+      <div class="field"><label for="pjIni">Inicio</label><input id="pjIni" type="date"></div>
+      <div class="field"><label for="pjFin">Fecha objetivo</label><input id="pjFin" type="date"></div>
+      <div class="field"><span style="font-size:14px;font-weight:600;color:var(--navy)">Color</span><div class="pj-colores">${COLORES_PJ.map((c, i) => `<label class="${c}"><input type="radio" name="pjColor" value="${c}" ${i === S.pj.lista.length % 10 ? 'checked' : ''}><span></span></label>`).join('')}</div></div>
+    </div><div style="display:flex;gap:10px"><button class="btn teal" type="submit">${ico('plus')} Crear proyecto</button><button class="btn ghost" type="button" data-accion="pjNuevoCancelar">Cancelar</button></div></form>` : '';
+  return `<div class="hello"><div><div class="eyebrow">Intranet · gerencia</div><h1>Proyectos de la <em>agencia</em></h1>
+      <p>Organiza cada proyecto en tarjetas, asigna responsables y fechas, y haz seguimiento al avance. Solo la gerencia ve este módulo.</p></div>
+      ${S.pj.nuevo ? '' : `<button class="btn teal" type="button" data-accion="pjNuevo">${ico('plus')} Nuevo proyecto</button>`}</div>
+    <div class="kpis">${kpi('ok', activos.length, 'Proyectos activos', 'target')}${kpi('info', abiertas, 'Actividades abiertas', 'file')}${kpi('bad', venc, 'Actividades vencidas', 'alert')}${kpi('mute', prom + ' %', 'Avance promedio', 'check')}</div>
+    ${form}
+    <div class="sec-h"><h2>${S.pj.verArch ? 'Proyectos archivados' : 'Proyectos'}</h2><button type="button" class="link" data-accion="pjVerArch">${S.pj.verArch ? 'Ver activos' : 'Ver archivados'}</button></div>
+    ${visibles.length ? `<div class="pj-grid">${visibles.map(tarjeta).join('')}</div>` : `<div class="card vacio">${S.pj.verArch ? 'No hay proyectos archivados.' : 'Todavía no hay proyectos. Toca <b>Nuevo proyecto</b> para crear el primero.'}</div>`}`;
+}
+function tableroView() {
+  const p = S.pj.lista.find(x => x.id === S.pj.actual); if (!p) return '';
+  const filtro = norm(S.pj.filtro || ''), fr = S.pj.filtroResp || '';
+  const ts = tareasDe(p.id), vis = ts.filter(t => (!filtro || norm(`${t.titulo} ${t.descripcion || ''}`).includes(filtro)) && (!fr || t.responsable_id === fr));
+  const av = avanceProyecto(p.id), resp = persona(p.responsable_id), nv = ts.filter(vencida).length;
+  const items = id => S.pj.items.filter(i => i.tarea_id === id), coms = id => S.pj.coms.filter(c => c.tarea_id === id);
+  const card = t => {
+    const it = items(t.id), hechos = it.filter(i => i.hecho).length, r = persona(t.responsable_id), pr = PRIORIDAD[t.prioridad] || PRIORIDAD.media, a = avanceTarea(t);
+    return `<button type="button" class="kcard ${vencida(t) ? 'vencida' : ''}" draggable="true" data-arrastrar="${t.id}" data-tarjeta="${t.id}">
+      <span class="kcard-top"><span class="chip ${pr[0]}">${pr[1]}</span>${t.fecha_limite ? `<span class="kfecha ${vencida(t) ? 'mal' : ''}">${ico('clock')} ${esc(fechaCortaPj(t.fecha_limite))}</span>` : ''}</span>
+      <b>${esc(t.titulo)}</b>
+      ${a > 0 ? `<span class="kav"><span class="num">${a} %</span>${barraAvance(a)}</span>` : ''}
+      <span class="kcard-pie">${it.length ? `<span class="${hechos === it.length ? 'ok' : ''}">${ico('check')} ${hechos}/${it.length}</span>` : ''}${coms(t.id).length ? `<span>${ico('mega')} ${coms(t.id).length}</span>` : ''}<span style="flex:1"></span>${r ? `<span class="avatar soft" title="${esc(r.nombre)}">${initials(r.nombre)}</span>` : ''}</span></button>`;
+  };
+  const col = ([k, l]) => {
+    const lista = vis.filter(t => t.columna === k).sort((a, b) => a.orden - b.orden || a.id - b.id);
+    return `<section class="kcol" data-columna="${k}"><header><b>${l}</b><span class="num">${ts.filter(t => t.columna === k).length}</span></header>
+      <div class="klista">${lista.map(card).join('')}</div>
+      ${S.pj.nuevaCol === k ? `<form class="knueva" data-nuevatarjeta="${k}" novalidate><textarea name="titulo" rows="2" placeholder="¿Qué hay que hacer?" required></textarea><span><button class="btn sm teal" type="submit">Agregar</button> <button class="btn ghost sm" type="button" data-accion="pjNuevaCancelar">Cancelar</button></span></form>`
+        : `<button type="button" class="kagregar" data-nuevacol="${k}">${ico('plus')} Agregar tarjeta</button>`}</section>`;
+  };
+  return `<div class="pj-cabeza"><button type="button" class="link" data-accion="pjVolver">‹ Todos los proyectos</button>
+      <div class="hello" style="margin-bottom:16px"><div><div class="eyebrow"><span class="pj-punto ${p.color}"></span> Proyecto${p.archivado ? ' · archivado' : ''}</div><h1>${esc(p.nombre)}</h1>
+        ${p.descripcion ? `<p>${esc(p.descripcion)}</p>` : ''}
+        <p class="hint" style="margin-top:6px">${resp ? `Responsable: <b>${esc(resp.nombre)}</b>` : 'Sin responsable'}${p.fecha_inicio || p.fecha_fin ? ` · ${esc(fechaCortaPj(p.fecha_inicio) || '…')} – ${esc(fechaCortaPj(p.fecha_fin) || '…')}` : ''}</p></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" type="button" data-accion="pjEditar">Editar proyecto</button></div></div></div>
+    <div class="pj-resumen card"><div class="pj-av grande"><span>Avance del proyecto</span><b class="num">${av} %</b>${barraAvance(av, true)}</div>
+      ${COLUMNAS.map(([k, l]) => `<div><span>${l}</span><b class="num">${ts.filter(t => t.columna === k).length}</b></div>`).join('')}
+      <div><span>Vencidas</span><b class="num" style="color:${nv ? 'var(--bad)' : 'inherit'}">${nv}</b></div></div>
+    <div class="toolbar" style="margin:16px 0"><div class="search" style="flex:0 1 280px">${ico('search')}<input id="pjFiltro" type="search" placeholder="Buscar tarjeta" value="${esc(S.pj.filtro || '')}" aria-label="Buscar tarjeta"></div>
+      <select id="pjFiltroResp" aria-label="Filtrar por responsable"><option value="">Todos los responsables</option>${S.personas.filter(x => ts.some(t => t.responsable_id === x.id)).map(x => `<option value="${x.id}" ${fr === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select>
+      <span class="hint">Arrastra las tarjetas entre columnas o ábrelas para ver el detalle.</span></div>
+    <div class="kanban">${COLUMNAS.map(col).join('')}</div>`;
+}
+function modalTarjetaView() {
+  const t = S.pj.tareas.find(x => x.id === S.pj.abierta); if (!t) return '';
+  const it = S.pj.items.filter(i => i.tarea_id === t.id), cm = S.pj.coms.filter(c => c.tarea_id === t.id).slice().reverse();
+  const hechos = it.filter(i => i.hecho).length, sugerido = it.length ? Math.round(hechos / it.length * 100) : null;
+  const sel = (campo, opciones, val) => `<select data-tcampo="${campo}">${opciones.map(([k, l]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  return `<div class="modal-fondo" data-cerrarmodal><div class="modal card" role="dialog" aria-modal="true" aria-label="Tarjeta">
+    <div class="modal-cabeza"><input class="modal-titulo" data-tcampo="titulo" value="${esc(t.titulo)}" aria-label="Título de la tarjeta"><button class="btn ghost sm" type="button" data-accion="cerrarModal">Cerrar</button></div>
+    <div class="modal-cuerpo"><div class="modal-principal">
+      <div class="form-grid">
+        <div class="field"><label>Columna</label>${sel('columna', COLUMNAS, t.columna)}</div>
+        <div class="field"><label>Responsable</label><select data-tcampo="responsable_id">${opcionesPersonas(t.responsable_id)}</select></div>
+        <div class="field"><label>Prioridad</label>${sel('prioridad', [['alta', 'Alta'], ['media', 'Media'], ['baja', 'Baja']], t.prioridad)}</div>
+        <div class="field"><label>Inicio</label><input type="date" data-tcampo="fecha_inicio" value="${t.fecha_inicio || ''}"></div>
+        <div class="field"><label>Fecha límite</label><input type="date" data-tcampo="fecha_limite" value="${t.fecha_limite || ''}"></div>
+      </div>
+      <div class="field"><label for="tAvance">Avance: <b id="tAvanceTxt">${avanceTarea(t)} %</b>${sugerido != null && sugerido !== avanceTarea(t) ? ` <button type="button" class="link" data-avancesugerido="${sugerido}" style="font-size:13px">usar ${sugerido} % según la lista</button>` : ''}</label>
+        <input id="tAvance" type="range" min="0" max="100" step="5" value="${avanceTarea(t)}" data-tcampo="avance" ${t.columna === 'hecho' ? 'disabled' : ''}>${t.columna === 'hecho' ? '<span class="hint">Las tarjetas en Hecho cuentan como 100 %.</span>' : ''}</div>
+      <div class="field"><label>Descripción</label><textarea data-tcampo="descripcion" rows="4" placeholder="Detalles, enlaces, acuerdos…">${esc(t.descripcion || '')}</textarea></div>
+      <div class="field"><label>Lista de pasos ${it.length ? `<span class="hint">${hechos}/${it.length}</span>` : ''}</label>
+        <div class="checklist">${it.map(i => `<div class="ck ${i.hecho ? 'hecho' : ''}"><label><input type="checkbox" data-item="${i.id}" ${i.hecho ? 'checked' : ''}> <span>${esc(i.texto)}</span></label><button type="button" class="link" data-borraritem="${i.id}" aria-label="Quitar paso">×</button></div>`).join('')}</div>
+        <form id="fItem" class="fila-form" novalidate><input name="texto" placeholder="Agregar un paso" required><button class="btn ghost sm" type="submit">Agregar</button></form></div>
+    </div><aside class="modal-lado">
+      <b class="lado-titulo">Seguimiento</b>
+      <form id="fComentario" novalidate><textarea name="texto" rows="3" placeholder="Escribe un avance, un acuerdo o una novedad" required></textarea><button class="btn sm teal" type="submit">Registrar</button></form>
+      <div class="seguimiento">${cm.map(c => { const a = persona(c.autor_id); return `<div class="seg-item"><span class="avatar soft">${initials(a ? a.nombre : '?')}</span><div><b>${esc(a ? a.nombre : 'Alguien')}</b> <span class="hint">${esc(cuando(c.creado))}</span><p>${esc(c.texto)}</p></div></div>`; }).join('') || '<p class="hint">Todavía no hay seguimiento en esta tarjeta.</p>'}</div>
+      <p class="hint">Creada ${esc(cuando(t.creado))}</p>
+      <button type="button" class="btn sm danger" data-borrartarjeta="${t.id}">${ico('trash')} Eliminar tarjeta</button>
+    </aside></div></div></div>`;
+}
+function modalProyectoView() {
+  const p = S.pj.editProyecto && S.pj.lista.find(x => x.id === S.pj.editProyecto); if (!p) return '';
+  return `<div class="modal-fondo" data-cerrarmodal><div class="modal card pequeno" role="dialog" aria-modal="true" aria-label="Editar proyecto">
+    <div class="modal-cabeza"><b style="font-family:var(--f-display);font-size:18px;color:var(--navy)">Editar proyecto</b><button class="btn ghost sm" type="button" data-accion="cerrarModal">Cerrar</button></div>
+    <div class="form-grid">
+      <div class="field" style="grid-column:1/-1"><label>Nombre</label><input data-pjcampo="nombre" value="${esc(p.nombre)}"></div>
+      <div class="field" style="grid-column:1/-1"><label>Descripción u objetivo</label><textarea data-pjcampo="descripcion" rows="3">${esc(p.descripcion || '')}</textarea></div>
+      <div class="field"><label>Responsable</label><select data-pjcampo="responsable_id">${opcionesPersonas(p.responsable_id)}</select></div>
+      <div class="field"><label>Inicio</label><input type="date" data-pjcampo="fecha_inicio" value="${p.fecha_inicio || ''}"></div>
+      <div class="field"><label>Fecha objetivo</label><input type="date" data-pjcampo="fecha_fin" value="${p.fecha_fin || ''}"></div>
+      <div class="field"><span style="font-size:14px;font-weight:600;color:var(--navy)">Color</span><div class="pj-colores">${COLORES_PJ.map(c => `<label class="${c}"><input type="radio" name="pjColorEd" data-pjcampo="color" value="${c}" ${c === p.color ? 'checked' : ''}><span></span></label>`).join('')}</div></div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px"><button class="btn ghost sm" type="button" data-pjarchivar="${p.id}">${p.archivado ? 'Restaurar proyecto' : 'Archivar proyecto'}</button>
+      <button class="btn sm danger" type="button" data-pjborrar="${p.id}">${ico('trash')} Eliminar proyecto</button></div></div></div>`;
+}
+async function pjGuardar(tabla, id, campos) {
+  await q(sb.from(tabla).update(campos).eq('id', id));
+  await cargarProyectos(); render();
+}
+// Mueve una tarjeta a una columna; si se suelta sobre otra tarjeta, queda justo antes de ella.
+async function pjMover(id, columna, antesDe) {
+  const t = S.pj.tareas.find(x => x.id === id); if (!t) return;
+  const lista = tareasDe(t.proyecto_id).filter(x => x.columna === columna && x.id !== id).sort((a, b) => a.orden - b.orden || a.id - b.id);
+  let orden;
+  if (antesDe) { const i = lista.findIndex(x => x.id === antesDe); const prev = lista[i - 1]; orden = prev ? (prev.orden + lista[i].orden) / 2 : lista[i].orden - 1; }
+  else orden = lista.length ? lista[lista.length - 1].orden + 1 : 1;
+  const campos = { columna, orden, actualizado: new Date().toISOString() };
+  if (columna === 'hecho') campos.avance = 100;
+  Object.assign(t, campos); render();                  // se ve al instante; luego se confirma con el servidor
+  try { await pjGuardar('tareas', id, campos); } catch (err) { toast(errorTexto(err)); await cargarProyectos(); render(); }
+}
+
 /* ── Navegación ── */
 async function ir(view) {
   S.view = view; S.menu = false; S.error = '';
@@ -1098,6 +1260,7 @@ async function ir(view) {
     if (view === 'asistencia') await cargarAsistencia();
     if (view === 'informes') await cargarInforme();
     if (view === 'equipo') await recargarPersonas();
+    if (view === 'proyectos') { S.pj.abierta = null; S.pj.editProyecto = null; await cargarProyectos(); }
   } catch (e) { toast(errorTexto(e)); }
   render(); window.scrollTo(0, 0);
 }
@@ -1107,6 +1270,39 @@ function ocupado(el, si) { if (el) el.classList.toggle('spin', si); }
 document.addEventListener('submit', async e => {
   e.preventDefault();
   const f = e.target, btn = f.querySelector('button[type=submit]');
+  if (f.id === 'fProyecto') {
+    const nombre = f.querySelector('#pjNombre').value.trim(); if (!nombre) { toast('Escribe el nombre del proyecto.'); return; }
+    ocupado(btn, true);
+    try {
+      const nuevo = await q(sb.from('proyectos').insert({ nombre, descripcion: f.querySelector('#pjDesc').value.trim() || null, responsable_id: f.querySelector('#pjResp').value || null,
+        fecha_inicio: f.querySelector('#pjIni').value || null, fecha_fin: f.querySelector('#pjFin').value || null,
+        color: (f.querySelector('input[name=pjColor]:checked') || {}).value || 'f0', archivado: false, orden: 0 }).select('id').single());
+      Object.assign(S.pj, { nuevo: false, actual: nuevo.id, nuevaCol: 'pendiente' }); await cargarProyectos(); render();
+      document.querySelector('.knueva textarea')?.focus(); toast('Proyecto creado. Agrega sus primeras tarjetas.');
+    } catch (err) { ocupado(btn, false); toast(errorTexto(err)); }
+    return;
+  }
+  if (f.dataset.nuevatarjeta) {
+    const titulo = f.titulo.value.trim(), col = f.dataset.nuevatarjeta; if (!titulo) return;
+    const enCol = tareasDe(S.pj.actual).filter(t => t.columna === col);
+    ocupado(btn, true);
+    try {
+      await q(sb.from('tareas').insert({ proyecto_id: S.pj.actual, titulo, columna: col, orden: enCol.length ? Math.max(...enCol.map(t => t.orden)) + 1 : 1,
+        prioridad: 'media', avance: col === 'hecho' ? 100 : 0, responsable_id: null }));
+      await cargarProyectos(); render(); document.querySelector('.knueva textarea')?.focus();
+    } catch (err) { ocupado(btn, false); toast(errorTexto(err)); }
+    return;
+  }
+  if (f.id === 'fItem' || f.id === 'fComentario') {
+    const texto = f.texto.value.trim(); if (!texto) return;
+    ocupado(btn, true);
+    try {
+      if (f.id === 'fItem') await q(sb.from('tarea_items').insert({ tarea_id: S.pj.abierta, texto, hecho: false, orden: S.pj.items.filter(i => i.tarea_id === S.pj.abierta).length }));
+      else await q(sb.from('tarea_comentarios').insert({ tarea_id: S.pj.abierta, texto, autor_id: P().id }));
+      await cargarProyectos(); render(); if (f.id === 'fItem') document.querySelector('#fItem input')?.focus();
+    } catch (err) { ocupado(btn, false); toast(errorTexto(err)); }
+    return;
+  }
   if (f.id === 'fLogin') {
     const correo = f.querySelector('#lCorreo').value.trim(), clave = f.querySelector('#lClave').value;
     S.correoLogin = correo;
@@ -1167,13 +1363,40 @@ document.addEventListener('click', async e => {
     if (fila.dataset.orden) S.inf.orden = fila.dataset.orden; else S.inf.sel = S.inf.sel === fila.dataset.selinf ? null : fila.dataset.selinf;
     render(); return;
   }
+  if (e.target.matches && e.target.matches('[data-cerrarmodal]')) { S.pj.abierta = null; S.pj.editProyecto = null; render(); return; }
   const b = e.target.closest('button'); if (!b) { if (S.menu && !e.target.closest('.menu')) { S.menu = false; render(); } return; }
+  if (b.dataset.pjabrir) { Object.assign(S.pj, { actual: Number(b.dataset.pjabrir), filtro: '', filtroResp: '', nuevaCol: null }); await cargarProyectos(); render(); window.scrollTo(0, 0); return; }
+  if (b.dataset.tarjeta) { S.pj.abierta = Number(b.dataset.tarjeta); render(); return; }
+  if (b.dataset.nuevacol) { S.pj.nuevaCol = b.dataset.nuevacol; render(); document.querySelector('.knueva textarea')?.focus(); return; }
+  if (b.dataset.avancesugerido) { await pjGuardar('tareas', S.pj.abierta, { avance: Number(b.dataset.avancesugerido), actualizado: new Date().toISOString() }); return; }
+  if (b.dataset.borraritem) { await q(sb.from('tarea_items').delete().eq('id', Number(b.dataset.borraritem))); await cargarProyectos(); render(); return; }
+  if (b.dataset.borrartarjeta) {
+    if (!confirm('¿Eliminar esta tarjeta con su lista de pasos y su seguimiento? No se puede deshacer.')) return;
+    await q(sb.from('tareas').delete().eq('id', Number(b.dataset.borrartarjeta))); S.pj.abierta = null; await cargarProyectos(); render(); toast('Tarjeta eliminada.'); return;
+  }
+  if (b.dataset.pjarchivar) {
+    const p = S.pj.lista.find(x => x.id === Number(b.dataset.pjarchivar));
+    await q(sb.from('proyectos').update({ archivado: !p.archivado }).eq('id', p.id));
+    Object.assign(S.pj, { editProyecto: null, actual: null, verArch: false }); await cargarProyectos(); render(); toast(p.archivado ? 'Proyecto restaurado.' : 'Proyecto archivado. Lo encuentras en "Ver archivados".'); return;
+  }
+  if (b.dataset.pjborrar) {
+    const p = S.pj.lista.find(x => x.id === Number(b.dataset.pjborrar));
+    if (prompt(`Para eliminar "${p.nombre}" y todas sus tarjetas, escribe ELIMINAR`) !== 'ELIMINAR') return;
+    await q(sb.from('proyectos').delete().eq('id', p.id)); Object.assign(S.pj, { editProyecto: null, actual: null }); await cargarProyectos(); render(); toast('Proyecto eliminado.'); return;
+  }
   if (b.dataset.guia) { document.getElementById(b.dataset.guia)?.scrollIntoView({ behavior: 'smooth' }); return; }
   if (b.dataset.selinf !== undefined) { S.inf.sel = b.dataset.selinf && S.inf.sel !== b.dataset.selinf ? b.dataset.selinf : null; render(); return; }
   const a = b.dataset.accion;
   if (b.dataset.view) { ir(b.dataset.view); return; }
   if (a === 'menu') { S.menu = !S.menu; render(); return; }
   if (a === 'exportar') { exportarInforme(); return; }
+  if (a === 'pjVolver') { Object.assign(S.pj, { actual: null, nuevaCol: null }); await cargarProyectos(); render(); return; }
+  if (a === 'pjNuevo') { S.pj.nuevo = true; render(); document.getElementById('pjNombre')?.focus(); return; }
+  if (a === 'pjNuevoCancelar') { S.pj.nuevo = false; render(); return; }
+  if (a === 'pjVerArch') { S.pj.verArch = !S.pj.verArch; render(); return; }
+  if (a === 'pjEditar') { S.pj.editProyecto = S.pj.actual; render(); return; }
+  if (a === 'pjNuevaCancelar') { S.pj.nuevaCol = null; render(); return; }
+  if (a === 'cerrarModal') { S.pj.abierta = null; S.pj.editProyecto = null; render(); return; }
   if (a === 'exportarAsistencia') { exportarAsistencia(); return; }
   if (b.dataset.comf) {
     S.com.filtro = b.dataset.comf;
@@ -1312,6 +1535,21 @@ document.addEventListener('focusout', e => {
 document.addEventListener('change', async e => {
   const el = e.target;
   try {
+    if (el.dataset.tcampo) {
+      const t = S.pj.tareas.find(x => x.id === S.pj.abierta), campo = el.dataset.tcampo; let v = el.value;
+      if (campo === 'titulo' && !v.trim()) { render(); return; }
+      if (campo === 'columna') { await pjMover(t.id, v); return; }
+      if (campo === 'avance') v = Number(v); else if (['responsable_id', 'fecha_inicio', 'fecha_limite', 'descripcion'].includes(campo)) v = v.trim() || null; else v = v.trim();
+      await pjGuardar('tareas', t.id, { [campo]: v, actualizado: new Date().toISOString() }); return;
+    }
+    if (el.dataset.item) { await pjGuardar('tarea_items', Number(el.dataset.item), { hecho: el.checked }); return; }
+    if (el.dataset.pjcampo) {
+      const campo = el.dataset.pjcampo; let v = el.value.trim();
+      if (campo === 'nombre' && !v) { render(); return; }
+      if (campo !== 'nombre' && campo !== 'color') v = v || null;
+      await pjGuardar('proyectos', S.pj.editProyecto, { [campo]: v }); return;
+    }
+    if (el.id === 'pjFiltroResp') { S.pj.filtroResp = el.value; render(); return; }
     if (el.dataset.celda) {
       const [tipo, pid, k] = el.dataset.celda.split('|'), v = el.value;
       S.malla.guardando = true;
@@ -1409,6 +1647,8 @@ document.addEventListener('change', async e => {
 });
 
 document.addEventListener('input', e => {
+  if (e.target.id === 'tAvance') { const x = document.getElementById('tAvanceTxt'); if (x) x.textContent = e.target.value + ' %'; return; }
+  if (e.target.id === 'pjFiltro') { S.pj.filtro = e.target.value; const pos = e.target.selectionStart; render(); const n = document.getElementById('pjFiltro'); n.focus(); n.setSelectionRange(pos, pos); return; }
   if (e.target.id === 'qCom') { S.com.q = e.target.value; document.getElementById('listaCom').innerHTML = listaComunicados(); return; }
   if (e.target.id === 'eFiltro') { S.equipo.filtro = e.target.value; const pos = e.target.selectionStart; render(); const n = document.getElementById('eFiltro'); n.focus(); n.setSelectionRange(pos, pos); }
 });
@@ -1425,8 +1665,25 @@ document.addEventListener('mousemove', e => {
   let x = e.clientX - box.left + 14; if (x + 240 > box.width) x = e.clientX - box.left - 250;
   tip.style.left = x + 'px'; tip.style.top = (e.clientY - box.top + 14) + 'px';
 });
+// Arrastrar tarjetas entre columnas del tablero de proyectos.
+document.addEventListener('dragstart', e => {
+  const c = e.target.closest && e.target.closest('[data-arrastrar]'); if (!c) return;
+  S.pj.drag = Number(c.dataset.arrastrar); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.dataset.arrastrar);
+  setTimeout(() => c.classList.add('arrastrando'), 0);
+});
+document.addEventListener('dragover', e => {
+  const col = S.pj.drag && e.target.closest && e.target.closest('.kcol'); if (!col) return;
+  e.preventDefault(); document.querySelectorAll('.kcol.sobre').forEach(x => x !== col && x.classList.remove('sobre')); col.classList.add('sobre');
+});
+document.addEventListener('drop', e => {
+  const col = S.pj.drag && e.target.closest && e.target.closest('.kcol'); if (!col) return;
+  e.preventDefault(); const destino = e.target.closest('[data-tarjeta]'), id = S.pj.drag; S.pj.drag = null;
+  const antes = destino && Number(destino.dataset.tarjeta) !== id ? Number(destino.dataset.tarjeta) : null;
+  pjMover(id, col.dataset.columna, antes);
+});
+document.addEventListener('dragend', () => { S.pj.drag = null; document.querySelectorAll('.kcol.sobre, .arrastrando').forEach(x => x.classList.remove('sobre', 'arrastrando')); });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && (S.menu || S.lb || S.malla.edit)) { S.menu = false; S.lb = null; S.malla.edit = null; render(); }
+  if (e.key === 'Escape' && (S.menu || S.lb || S.malla.edit || S.pj.abierta || S.pj.editProyecto)) { S.menu = false; S.lb = null; S.malla.edit = null; S.pj.abierta = null; S.pj.editProyecto = null; render(); }
   if (S.lb && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { const n = S.lb.items.length; S.lb.i = (S.lb.i + (e.key === 'ArrowRight' ? 1 : -1) + n) % n; render(); }
 });
 
