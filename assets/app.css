@@ -169,3 +169,8 @@ table.malla select.shift { min-width: 92px; max-width: 220px; text-align-last: l
 .tabs .badge.roja { background: #c62828; color: #fff; }
 .alerta.nueva { background: #e6f6f5; border-color: #9fdcd7; border-left-color: var(--teal); }
 .alerta.nueva .sq { color: var(--teal); }
+.alerta.coment { background: #eaf2fb; border-color: #b9d2ee; border-left-color: #2f6fb5; }
+.alerta.coment .sq { color: #2f6fb5; }
+.kcom-nuevo { display: inline-flex; align-items: center; gap: 3px; background: #2f6fb5; color: #fff; border-radius: 99px; padding: 1px 8px 1px 6px; font-weight: 600; }
+.kcom-nuevo .ico { width: 13px; height: 13px; }
+.seg-item.nuevo > div { background: #eaf2fb; box-shadow: inset 3px 0 0 #2f6fb5; }

@@ -11,7 +11,7 @@
       { id: 2, nombre: 'KAM 360', descripcion: 'Equipo comercial.', icono: 'target', pie: 'Comercial', url: 'https://example.com', orden: 2, activo: true }],
     configuracion: [{ clave: 'tolerancias', valor: { entrada_min: 5, almuerzo_min: 5 } }, { clave: 'validar_ip', valor: { activo: false } }, { clave: 'modulo_solicitudes', valor: { activo: false } }],
     perfiles: [{ id: ADMIN, nombre: 'Georgina Ávila', correo: 'georgina.avila@wakanda.travel', sede_id: 1, area_id: 1, rol: 'gerente', es_admin: true, activo: true, acepto_datos: null }],
-    malla: [], horario_base: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: [], proyectos: [], tareas: [], tarea_items: [], tarea_comentarios: []
+    malla: [], horario_base: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: [], proyectos: [], tareas: [], tarea_items: [], tarea_comentarios: [], tarea_lecturas: []
   };
   let tid = 1;
   for (const s of [1, 2]) for (const [c, n, e, a, r, sa] of [['M', 'Mañana', '08:00:00', '12:30:00', '13:30:00', '17:30:00'], ['T', 'Tarde', '10:00:00', '14:00:00', '15:00:00', '19:00:00'], ['S', 'Sábado', '09:00:00', null, null, '13:00:00'], ['D', 'Descanso', null, null, null, null]])
@@ -40,7 +40,8 @@
   DB.perfiles.filter(x => x.id !== ADMIN).forEach(x => { const M = DB.turnos.find(t => t.sede_id === x.sede_id && t.codigo === 'M'), Sa = DB.turnos.find(t => t.sede_id === x.sede_id && t.codigo === 'S'); for (let d = 1; d <= 5; d++) DB.horario_base.push({ persona_id: x.id, dia: d, turno_id: M.id }); DB.horario_base.push({ persona_id: x.id, dia: 6, turno_id: Sa.id }); });
   DB.proyectos.push({ id: 1, nombre: 'Nueva página web', descripcion: 'Rediseño del sitio de la agencia', color: 'f3', responsable_id: ADMIN, responsable_externo: null, fecha_inicio: null, fecha_fin: '2027-03-31', archivado: false, orden: 0, creado: new Date().toISOString() });
   [['Fotos de destinos', '00000000-0000-0000-0000-000000000110', null, 'en_curso', 30], ['Desarrollo del sitio', null, 'Agencia Pixel', 'pendiente', 0], ['Textos de paquetes', '00000000-0000-0000-0000-000000000110', null, 'pendiente', 0], ['Aprobar diseño', ADMIN, null, 'revision', 80]]
-    .forEach(([titulo, rid, ext, columna, avance], i) => DB.tareas.push({ id: i + 1, proyecto_id: 1, titulo, descripcion: null, columna, orden: i, responsable_id: rid, responsable_externo: ext, fecha_inicio: null, fecha_limite: i === 0 ? '2026-12-15' : i === 2 ? '2026-11-01' : null, asignacion_vista: i === 0, prioridad: 'media', avance, creado: new Date().toISOString(), actualizado: new Date().toISOString() }));
+    .forEach(([titulo, rid, ext, columna, avance], i) => DB.tareas.push({ id: i + 1, proyecto_id: 1, titulo, descripcion: null, columna, orden: i, responsable_id: rid, responsable_externo: ext, fecha_inicio: null, fecha_limite: i === 0 ? '2026-12-15' : i === 2 ? '2026-11-01' : null, asignacion_vista: i === 0, prioridad: 'media', avance, creado_por: ADMIN, creado: new Date().toISOString(), actualizado: new Date().toISOString() }));
+  DB.tarea_comentarios.push({ id: 1, tarea_id: 3, autor_id: ADMIN, texto: '¿Cómo vas con los textos? Necesitamos los de Cartagena primero.', creado: new Date(Date.now() - 36e5).toISOString() });
   let sesion = null, meta = { debe_cambiar_contrasena: true };
   class Q {
     constructor(t) { this.t = t; this.f = []; this.op = 'select'; this.one = false; }
@@ -89,6 +90,12 @@
     DB.__me = out; return new Q('__me');
   };
   const rpcAsync = async (fn, args) => {
+      if (fn === 'comentarios_sin_leer') {
+        const out = {};
+        for (const c of DB.tarea_comentarios) { const t = DB.tareas.find(x => x.id === c.tarea_id); if (!t || c.autor_id === actual || (t.responsable_id !== actual && t.creado_por !== actual)) continue;
+          const l = DB.tarea_lecturas.find(x => x.tarea_id === c.tarea_id && x.persona_id === actual); if (l && c.creado <= l.visto) continue; out[c.tarea_id] = (out[c.tarea_id] || 0) + 1; }
+        return { data: Object.entries(out).map(([k, v]) => ({ tarea_id: Number(k), sin_leer: v })), error: null };
+      }
       if (fn === 'aceptar_datos') { DB.perfiles.find(x => x.id === actual).acepto_datos = new Date().toISOString(); return { error: null }; }
       if (fn === 'marcar') {
         const f = hoyTz('America/Bogota');

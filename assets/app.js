@@ -44,6 +44,19 @@ async function revisarVersion() {
   } catch (_) {}
 }
 revisarVersion();
+// Cada 2 minutos (y al volver a la pestaña) revisa si hay tareas o comentarios nuevos, sin interrumpir a quien escribe.
+async function refrescarAvisos() {
+  if (S.pantalla !== 'app' || document.visibilityState !== 'visible') return;
+  const antes = JSON.stringify([S.pj.nuevas, S.pj.vencidas, S.pj.sinLeer, S.pj.tengo]);
+  await contarTareas();
+  if (JSON.stringify([S.pj.nuevas, S.pj.vencidas, S.pj.sinLeer, S.pj.tengo]) === antes) return;
+  const ocupada = S.pj.abierta || S.pj.editProyecto || S.pj.nuevo || S.pj.nuevaCol || ['INPUT', 'TEXTAREA', 'SELECT'].includes((document.activeElement || {}).tagName);
+  if (ocupada) return;
+  if (S.view === 'proyectos') await cargarProyectos();
+  render();
+}
+setInterval(refrescarAvisos, 120000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refrescarAvisos(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revisarVersion(); });
 
 /* ── Íconos (Lucide, trazo 2px) ── */
@@ -102,7 +115,7 @@ const S = {
   inf: { mes: null, desde: null, hasta: null, sede: 0, area: 0, orden: 'minT', sel: null, datos: null },
   com: { lista: [], imgs: {}, lect: [], filtro: 'todos', q: '', borrador: [], hl: null },
   lb: null,
-  pj: { lista: [], tareas: [], items: [], coms: [], actual: null, abierta: null, editProyecto: null, nuevo: false, nuevaCol: null, verArch: false, filtro: '', filtroResp: '', drag: null, tengo: false, vencidas: 0, nuevas: 0, extEdit: null, extEditP: null, filtroPj: '' },
+  pj: { lista: [], tareas: [], items: [], coms: [], actual: null, abierta: null, editProyecto: null, nuevo: false, nuevaCol: null, verArch: false, filtro: '', filtroResp: '', drag: null, tengo: false, vencidas: 0, nuevas: 0, sinLeer: {}, lecturas: {}, vistoAntes: null, extEdit: null, extEditP: null, filtroPj: '' },
   sol: { lista: [], adj: {}, revisores: [], tipo: 'vacaciones', borrador: [], ausencias: [] }
 };
 
@@ -272,7 +285,7 @@ function appView() {
   const rol = ROLES[p.rol] + (p.es_admin ? ' · administración' : '');
   return `<header class="top"><div class="wrap">
       <div class="brand"><img src="assets/logo-wakanda.png" alt=""><span>Wakanda Travel</span></div>
-      <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}${k === 'comunicados' && pendCom ? `<span class="badge" aria-label="${pendCom} sin confirmar">${pendCom}</span>` : ''}${k === 'proyectos' && S.pj.vencidas ? `<span class="badge roja" aria-label="${S.pj.vencidas} vencidas">${S.pj.vencidas}</span>` : k === 'proyectos' && S.pj.nuevas && !esGerencia() ? `<span class="badge" aria-label="${S.pj.nuevas} nuevas">${S.pj.nuevas}</span>` : ''}${k === 'solicitudes' && pendSol ? `<span class="badge" aria-label="${pendSol} por revisar">${pendSol}</span>` : ''}</button>`).join('')}</nav>
+      <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}${k === 'comunicados' && pendCom ? `<span class="badge" aria-label="${pendCom} sin confirmar">${pendCom}</span>` : ''}${k === 'proyectos' && S.pj.vencidas ? `<span class="badge roja" aria-label="${S.pj.vencidas} vencidas">${S.pj.vencidas}</span>` : k === 'proyectos' && ((esGerencia() ? 0 : S.pj.nuevas) + comentariosNuevos()) ? `<span class="badge" aria-label="avisos nuevos">${(esGerencia() ? 0 : S.pj.nuevas) + comentariosNuevos()}</span>` : ''}${k === 'solicitudes' && pendSol ? `<span class="badge" aria-label="${pendSol} por revisar">${pendSol}</span>` : ''}</button>`).join('')}</nav>
       <div class="menu"><button type="button" data-accion="menu" aria-expanded="${S.menu}" aria-label="Menú de ${esc(p.nombre)}"><span class="avatar">${initials(p.nombre)}</span></button>
         ${S.menu ? `<div class="menu-pop"><div class="who"><b>${esc(p.nombre)}</b>${esc(rol)} · ${esc(sede(p.sede_id).nombre)}</div>
           <button type="button" data-view="guia">Guía de uso</button><button type="button" data-view="clave">Cambiar contraseña</button><button type="button" data-accion="salir">Cerrar sesión</button></div>` : ''}</div>
@@ -328,6 +341,7 @@ function guiaView() {
       <li><b>Arrastra</b> las tarjetas de una columna a otra a medida que avanzan. Al pasar a <b>Hecho</b> quedan en 100 %.</li>
       <li>Haz clic en una tarjeta para abrirla: responsable, prioridad, fecha límite, <b>porcentaje de avance</b>, descripción, <b>lista de pasos</b> y <b>seguimiento</b> (avances, acuerdos o novedades con fecha y autor).</li></ol>
       <p><b>Responsables:</b> puedes asignar a cualquier persona de la intranet o elegir <b>Externo</b> y escribir el nombre (un proveedor, una agencia, un consultor). Quien recibe una tarjeta y tiene cuenta en la intranet ve la pestaña <b>Mis tareas</b> con solo sus tarjetas: puede moverlas de columna, actualizar el avance, marcar y agregar pasos y registrar seguimiento, pero no cambiar el título, las fechas ni el responsable, ni ver el resto del proyecto.</p>
+      <p><b>Comentarios:</b> lo que escribes en el seguimiento de una tarjeta le aparece a su responsable como <b>comentario nuevo</b> en Inicio y en la tarjeta. Igual a ti: cuando el responsable comenta en una tarjeta que tú creaste, lo ves como nuevo.</p>
       <p><b>Avisos:</b> quien recibe una tarjeta ve en Inicio el aviso de tarea nueva (con la etiqueta <b>Nueva</b> en la tarjeta hasta que la abre). Las tarjetas vencidas generan una alerta en rojo en Inicio y en la pestaña, tanto para la gerencia como para su responsable. Los responsables externos no tienen cuenta, así que no ven avisos.</p>
       <p>El avance del proyecto es el promedio del avance de sus tarjetas. Las tarjetas con la fecha límite vencida se marcan en rojo. Los proyectos terminados se pueden <b>archivar</b> desde <b>Editar proyecto</b>.</p>` },
     { id: 'g-cuentas', t: 'Para supervisores: cuentas y malla', si: P().rol === 'supervisor' && !P().es_admin, html: `
@@ -343,6 +357,7 @@ function guiaView() {
       <ul><li><b>Arrastra</b> cada tarjeta a la columna que corresponda: Por hacer, En curso, En revisión o Hecho.</li>
       <li>Ábrela para <b>actualizar el porcentaje de avance</b>, marcar o agregar <b>pasos</b> y escribir el <b>seguimiento</b> (qué hiciste, qué falta, novedades).</li>
       <li>El título, las fechas y la prioridad los define la gerencia.</li>
+      <li>Cuando alguien comenta en tu tarjeta, en <b>Inicio</b> verás <b>"Tienes un comentario nuevo"</b> y la tarjeta tendrá una marca azul hasta que la abras. Responde en el seguimiento y actualiza el avance.</li>
       <li>Cuando te asignan una tarea, en <b>Inicio</b> verás el aviso <b>"Tienes una tarea nueva asignada"</b> y la tarjeta tendrá la etiqueta <b>Nueva</b> hasta que la abras. Si una tarea se vence sin estar en Hecho, el aviso aparece en <b>rojo</b>.</li></ul>` },
     { id: 'g-faq', t: 'Preguntas frecuentes', html: `
       <p><b>Olvidé mi contraseña.</b> Pídele a la gerencia que la restablezca; recibirás una temporal.</p>
@@ -389,7 +404,7 @@ function inicioView() {
   return `<div class="hello"><div><div class="eyebrow">Intranet · ${esc(fechaLarga(S.hoy.fecha))}</div>
       <h1>${saludo}, <em>${esc(p.nombre.split(' ')[0])}</em></h1>
       <p>${esc(area(p.area_id).nombre)} · Sede ${esc(sede(p.sede_id).nombre)}. Marca tu jornada y abre tus herramientas desde aquí.</p></div><button class="btn ghost sm" type="button" data-view="guia">¿Dudas? Guía de uso</button></div>
-    ${alertaVencidas()}${alertaNuevas()}${avisoLectura()}
+    ${alertaVencidas()}${alertaNuevas()}${alertaComentarios()}${avisoLectura()}
     <div class="grid-home"><div class="col">${paseView()}
       <section><div class="sec-h"><h2>Herramientas</h2><span class="hint">Se abren en una pestaña nueva</span></div>${herramientasView()}</section></div>
       <div class="col">${comunicadosMini()}${moduloSol() ? misSolicitudesMini() : ''}${semanaView()}</div></div>`;
@@ -1118,6 +1133,15 @@ async function contarTareas() {
       S.pj.tengo = ts.length > 0; S.pj.vencidas = ts.filter(vencida).length; S.pj.nuevas = ts.filter(t => !t.asignacion_vista).length;
     }
   } catch (_) { /* si falla, la intranet sigue funcionando sin la alerta */ }
+  try { S.pj.sinLeer = Object.fromEntries((await q(sb.rpc('comentarios_sin_leer'))).map(r => [r.tarea_id, r.sin_leer])); } catch (_) {}
+}
+const comentariosNuevos = () => Object.values(S.pj.sinLeer).reduce((a, n) => a + n, 0);
+function alertaComentarios(conBoton = true) {
+  const n = comentariosNuevos(); if (!n) return '';
+  const tareas = Object.values(S.pj.sinLeer).filter(Boolean).length;
+  return `<div class="alerta coment" role="status"><span class="sq">${ico('mega')}</span><div><b>Tienes ${n === 1 ? 'un comentario nuevo' : `${n} comentarios nuevos`} en ${tareas === 1 ? 'una tarea' : `${tareas} tareas`}</b>
+    <span>${conBoton ? 'Revísalo y actualiza la tarea si hace falta.' : 'Las tarjetas con comentarios nuevos tienen la marca azul. Ábrelas para leerlos.'}</span></div>
+    ${conBoton ? `<button type="button" class="btn sm" style="background:#2f6fb5;color:#fff" data-view="proyectos">${esGerencia() ? 'Ver proyectos' : 'Ver mis tareas'}</button>` : ''}</div>`;
 }
 function alertaVencidas(conBoton = true) {
   const n = S.pj.vencidas; if (!n || (!esGerencia() && !S.pj.tengo)) return '';
@@ -1154,6 +1178,10 @@ async function cargarProyectos() {
     todas(() => sb.from('tareas').select('*').order('proyecto_id').order('orden').order('id'))
   ]);
   S.pj.lista = lista; S.pj.tareas = tareas;
+  try {
+    const [lec, sl] = await Promise.all([q(sb.from('tarea_lecturas').select('tarea_id,visto').eq('persona_id', P().id)), q(sb.rpc('comentarios_sin_leer'))]);
+    S.pj.lecturas = Object.fromEntries(lec.map(l => [l.tarea_id, l.visto])); S.pj.sinLeer = Object.fromEntries(sl.map(r => [r.tarea_id, r.sin_leer]));
+  } catch (_) {}
   if (!esGerencia()) { S.pj.tengo = tareas.length > 0; S.pj.actual = null; S.pj.vencidas = tareas.filter(vencida).length; S.pj.nuevas = tareas.filter(t => !t.asignacion_vista).length; }
   else S.pj.vencidas = tareas.filter(t => vencida(t) && lista.some(p => p.id === t.proyecto_id && !p.archivado)).length;
   if (S.pj.actual && !lista.some(p => p.id === S.pj.actual)) S.pj.actual = null;
@@ -1165,7 +1193,7 @@ async function cargarProyectos() {
 }
 function proyectosView() {
   if (!esGerencia()) return misTareasView() + modalTarjetaView();
-  if (!S.pj.actual && S.pj.vencidas) return listaProyectosView().replace('<div class="kpis">', `${alertaVencidas(false)}<div class="kpis">`) + modalTarjetaView() + modalProyectoView();
+  if (!S.pj.actual) return listaProyectosView().replace('<div class="kpis">', `${alertaVencidas(false)}${alertaComentarios(false)}<div class="kpis">`) + modalTarjetaView() + modalProyectoView();
   return (S.pj.actual ? tableroView() : listaProyectosView()) + modalTarjetaView() + modalProyectoView();
 }
 function listaProyectosView() {
@@ -1180,7 +1208,7 @@ function listaProyectosView() {
       <h3>${esc(p.nombre)}</h3>${p.descripcion ? `<p>${esc(p.descripcion.length > 120 ? p.descripcion.slice(0, 117) + '…' : p.descripcion)}</p>` : ''}
       <div class="pj-meta">${p.fecha_inicio || p.fecha_fin ? `<span>${ico('clock')} ${esc(fechaCortaPj(p.fecha_inicio) || '…')} – ${esc(fechaCortaPj(p.fecha_fin) || '…')}</span>` : ''}${respAvatar(p)}</div>
       <div class="pj-av"><b class="num">${av} %</b>${barraAvance(av)}</div>
-      <div class="pj-cuenta">${COLUMNAS.map(([k, l]) => `<span title="${l}">${l}: <b>${ts.filter(t => t.columna === k).length}</b></span>`).join('')}${nv ? `<span class="chip bad">${nv} vencida${nv === 1 ? '' : 's'}</span>` : ''}</div></button>`;
+      <div class="pj-cuenta">${COLUMNAS.map(([k, l]) => `<span title="${l}">${l}: <b>${ts.filter(t => t.columna === k).length}</b></span>`).join('')}${nv ? `<span class="chip bad">${nv} vencida${nv === 1 ? '' : 's'}</span>` : ''}${(() => { const c = ts.reduce((a, t) => a + (S.pj.sinLeer[t.id] || 0), 0); return c ? `<span class="chip info">${c} comentario${c === 1 ? '' : 's'} nuevo${c === 1 ? '' : 's'}</span>` : ''; })()}</div></button>`;
   };
   const form = S.pj.nuevo ? `<form class="card compose" id="fProyecto" novalidate style="margin-bottom:22px"><div class="form-grid">
       <div class="field" style="grid-column:1/-1"><label for="pjNombre">Nombre del proyecto</label><input id="pjNombre" required maxlength="120" placeholder="Ej.: Lanzamiento de la nueva página web"></div>
@@ -1236,7 +1264,7 @@ function tarjetaKanban(t, conProyecto) {
       <span class="kcard-top"><span class="chip ${pr[0]}">${pr[1]}</span>${t.fecha_limite ? `<span class="kfecha ${vencida(t) ? 'mal' : ''}">${ico('clock')} ${esc(fechaCortaPj(t.fecha_limite))}</span>` : ''}</span>
       <b>${esc(t.titulo)}</b>
       ${a > 0 ? `<span class="kav"><span class="num">${a} %</span>${barraAvance(a)}</span>` : ''}
-      <span class="kcard-pie">${it.length ? `<span class="${hechos === it.length ? 'ok' : ''}">${ico('check')} ${hechos}/${it.length}</span>` : ''}${nc ? `<span>${ico('mega')} ${nc}</span>` : ''}<span style="flex:1"></span>${conProyecto ? '' : respAvatar(t)}</span></button>`;
+      <span class="kcard-pie">${it.length ? `<span class="${hechos === it.length ? 'ok' : ''}">${ico('check')} ${hechos}/${it.length}</span>` : ''}${S.pj.sinLeer[t.id] ? `<span class="kcom-nuevo" title="Comentarios nuevos">${ico('mega')} ${S.pj.sinLeer[t.id]} nuevo${S.pj.sinLeer[t.id] === 1 ? '' : 's'}</span>` : nc ? `<span>${ico('mega')} ${nc}</span>` : ''}<span style="flex:1"></span>${conProyecto ? '' : respAvatar(t)}</span></button>`;
 }
 // Vista para quien no es gerencia: solo las tarjetas que tiene asignadas, de todos los proyectos.
 function misTareasView() {
@@ -1246,7 +1274,7 @@ function misTareasView() {
       <div class="klista">${ts.filter(t => t.columna === k).sort((a, b) => a.orden - b.orden || a.id - b.id).map(t => tarjetaKanban(t, true)).join('') || '<p class="hint" style="margin:4px">—</p>'}</div></section>`;
   return `<div class="hello"><div><div class="eyebrow">Proyectos</div><h1>Mis <em>tareas</em></h1>
       <p>Estas son las actividades de proyectos que la gerencia te asignó. Muévelas de columna, actualiza el avance, marca los pasos y registra el seguimiento.</p></div></div>
-    ${alertaVencidas(false)}${alertaNuevas(false)}
+    ${alertaVencidas(false)}${alertaNuevas(false)}${alertaComentarios(false)}
     <div class="toolbar" style="margin:0 0 16px"><select id="pjFiltroPj" aria-label="Filtrar por proyecto"><option value="">Todos los proyectos</option>${S.pj.lista.map(p => `<option value="${p.id}" ${fp === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select>
       <span class="hint">${abiertas} abierta${abiertas === 1 ? '' : 's'}${venc ? ` · <b style="color:var(--bad)">${venc} vencida${venc === 1 ? '' : 's'}</b>` : ''} · Arrastra las tarjetas entre columnas o ábrelas para ver el detalle.</span></div>
     ${S.pj.tareas.length ? `<div class="kanban">${COLUMNAS.map(col).join('')}</div>` : '<div class="card vacio">No tienes tareas asignadas en este momento.</div>'}`;
@@ -1280,7 +1308,7 @@ function modalTarjetaView() {
     </div><aside class="modal-lado">
       <b class="lado-titulo">Seguimiento</b>
       <form id="fComentario" novalidate><textarea name="texto" rows="3" placeholder="Escribe un avance, un acuerdo o una novedad" required></textarea><button class="btn sm teal" type="submit">Registrar</button></form>
-      <div class="seguimiento">${cm.map(c => { const a = persona(c.autor_id); return `<div class="seg-item"><span class="avatar soft">${initials(a ? a.nombre : '?')}</span><div><b>${esc(a ? a.nombre : 'Alguien')}</b> <span class="hint">${esc(cuando(c.creado))}</span><p>${esc(c.texto)}</p></div></div>`; }).join('') || '<p class="hint">Todavía no hay seguimiento en esta tarjeta.</p>'}</div>
+      <div class="seguimiento">${cm.map(c => { const a = persona(c.autor_id), nuevo = c.autor_id !== P().id && (!S.pj.vistoAntes || c.creado > S.pj.vistoAntes); return `<div class="seg-item ${nuevo ? 'nuevo' : ''}"><span class="avatar soft">${initials(a ? a.nombre : '?')}</span><div><b>${esc(a ? a.nombre : 'Alguien')}</b> <span class="hint">${esc(cuando(c.creado))}</span>${nuevo ? ' <span class="chip info">Nuevo</span>' : ''}<p>${esc(c.texto)}</p></div></div>`; }).join('') || '<p class="hint">Todavía no hay seguimiento en esta tarjeta.</p>'}</div>
       <p class="hint">Creada ${esc(cuando(t.creado))}</p>
       ${ger ? `<button type="button" class="btn sm danger" data-borrartarjeta="${t.id}">${ico('trash')} Eliminar tarjeta</button>` : ''}
     </aside></div></div></div>`;
@@ -1300,6 +1328,12 @@ function modalProyectoView() {
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px"><button class="btn ghost sm" type="button" data-pjarchivar="${p.id}">${p.archivado ? 'Restaurar proyecto' : 'Archivar proyecto'}</button>
       <button class="btn sm danger" type="button" data-pjborrar="${p.id}">${ico('trash')} Eliminar proyecto</button></div></div></div>`;
+}
+// Guarda que abrí la tarjeta: sus comentarios dejan de contar como nuevos para mí.
+async function marcarLeida(id) {
+  const ahora = new Date().toISOString(); S.pj.lecturas[id] = ahora; const habia = S.pj.sinLeer[id]; delete S.pj.sinLeer[id];
+  try { await q(sb.from('tarea_lecturas').upsert({ tarea_id: id, persona_id: P().id, visto: ahora }, { onConflict: 'tarea_id,persona_id' })); } catch (_) {}
+  if (habia) render();
 }
 async function pjGuardar(tabla, id, campos) {
   await q(sb.from(tabla).update(campos).eq('id', id));
@@ -1368,7 +1402,7 @@ document.addEventListener('submit', async e => {
     ocupado(btn, true);
     try {
       if (f.id === 'fItem') await q(sb.from('tarea_items').insert({ tarea_id: S.pj.abierta, texto, hecho: false, orden: S.pj.items.filter(i => i.tarea_id === S.pj.abierta).length }));
-      else await q(sb.from('tarea_comentarios').insert({ tarea_id: S.pj.abierta, texto, autor_id: P().id }));
+      else { await q(sb.from('tarea_comentarios').insert({ tarea_id: S.pj.abierta, texto, autor_id: P().id })); await marcarLeida(S.pj.abierta); }
       await cargarProyectos(); render(); if (f.id === 'fItem') document.querySelector('#fItem input')?.focus();
     } catch (err) { ocupado(btn, false); toast(errorTexto(err)); }
     return;
@@ -1437,7 +1471,8 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b) { if (S.menu && !e.target.closest('.menu')) { S.menu = false; render(); } return; }
   if (b.dataset.pjabrir) { Object.assign(S.pj, { actual: Number(b.dataset.pjabrir), filtro: '', filtroResp: '', nuevaCol: null }); await cargarProyectos(); render(); window.scrollTo(0, 0); return; }
   if (b.dataset.tarjeta) {
-    S.pj.abierta = Number(b.dataset.tarjeta); render();
+    S.pj.abierta = Number(b.dataset.tarjeta); S.pj.vistoAntes = S.pj.lecturas[S.pj.abierta] || null; render();
+    marcarLeida(S.pj.abierta);
     const t = S.pj.tareas.find(x => x.id === S.pj.abierta);
     if (t && !esGerencia() && !t.asignacion_vista) { t.asignacion_vista = true; S.pj.nuevas = Math.max(0, S.pj.nuevas - 1); try { await q(sb.from('tareas').update({ asignacion_vista: true }).eq('id', t.id)); } catch (_) {} render(); }
     return;
