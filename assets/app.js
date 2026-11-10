@@ -102,7 +102,7 @@ const S = {
   inf: { mes: null, desde: null, hasta: null, sede: 0, area: 0, orden: 'minT', sel: null, datos: null },
   com: { lista: [], imgs: {}, lect: [], filtro: 'todos', q: '', borrador: [], hl: null },
   lb: null,
-  pj: { lista: [], tareas: [], items: [], coms: [], actual: null, abierta: null, editProyecto: null, nuevo: false, nuevaCol: null, verArch: false, filtro: '', filtroResp: '', drag: null },
+  pj: { lista: [], tareas: [], items: [], coms: [], actual: null, abierta: null, editProyecto: null, nuevo: false, nuevaCol: null, verArch: false, filtro: '', filtroResp: '', drag: null, tengo: false, extEdit: null, extEditP: null, filtroPj: '' },
   sol: { lista: [], adj: {}, revisores: [], tipo: 'vacaciones', borrador: [], ausencias: [] }
 };
 
@@ -201,6 +201,7 @@ async function cargarUsuario(user) {
     if (user.user_metadata && user.user_metadata.debe_cambiar_contrasena) { S.pantalla = 'clave'; render(); return; }
     if (!perfil.acepto_datos) { S.pantalla = 'datos'; render(); return; }
     S.personas = await q(sb.from('perfiles').select('id,nombre,correo,sede_id,area_id,rol,es_admin,activo').order('nombre'));
+    if (!esGerencia()) { try { S.pj.tengo = (await q(sb.from('tareas').select('id').eq('responsable_id', perfil.id).limit(1))).length > 0; } catch (_) { S.pj.tengo = false; } }
     S.pantalla = 'app'; S.view = 'inicio';
     await cargarInicio(); render();
   } catch (e) { S.pantalla = 'login'; S.error = errorTexto(e); render(); }
@@ -265,7 +266,7 @@ function appView() {
   if (esLider()) tabs.push(['asistencia', 'Asistencia'], ['informes', 'Informes']);
   if (moduloSol() || esGerencia()) tabs.push(['solicitudes', 'Solicitudes']);
   if (gestionaCuentas()) tabs.push(['equipo', 'Equipo']);
-  if (esGerencia()) tabs.push(['proyectos', 'Proyectos']);
+  if (esGerencia()) tabs.push(['proyectos', 'Proyectos']); else if (S.pj.tengo) tabs.push(['proyectos', 'Mis tareas']);
   const pendSol = moduloSol() ? porRevisar().filter(x => puedeAprobar(x)).length : 0;
   const vistas = { proyectos: proyectosView, informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, guia: guiaView, clave: () => claveView(false) };
   const rol = ROLES[p.rol] + (p.es_admin ? ' · administración' : '');
@@ -326,6 +327,7 @@ function guiaView() {
       <li>Dentro del proyecto hay cuatro columnas: <b>Por hacer, En curso, En revisión y Hecho</b>. Con <b>Agregar tarjeta</b> creas cada actividad.</li>
       <li><b>Arrastra</b> las tarjetas de una columna a otra a medida que avanzan. Al pasar a <b>Hecho</b> quedan en 100 %.</li>
       <li>Haz clic en una tarjeta para abrirla: responsable, prioridad, fecha límite, <b>porcentaje de avance</b>, descripción, <b>lista de pasos</b> y <b>seguimiento</b> (avances, acuerdos o novedades con fecha y autor).</li></ol>
+      <p><b>Responsables:</b> puedes asignar a cualquier persona de la intranet o elegir <b>Externo</b> y escribir el nombre (un proveedor, una agencia, un consultor). Quien recibe una tarjeta y tiene cuenta en la intranet ve la pestaña <b>Mis tareas</b> con solo sus tarjetas: puede moverlas de columna, actualizar el avance, marcar y agregar pasos y registrar seguimiento, pero no cambiar el título, las fechas ni el responsable, ni ver el resto del proyecto.</p>
       <p>El avance del proyecto es el promedio del avance de sus tarjetas. Las tarjetas con la fecha límite vencida se marcan en rojo. Los proyectos terminados se pueden <b>archivar</b> desde <b>Editar proyecto</b>.</p>` },
     { id: 'g-cuentas', t: 'Para supervisores: cuentas y malla', si: P().rol === 'supervisor' && !P().es_admin, html: `
       <p>Como supervisor manejas las cuentas de los colaboradores desde la pestaña <b>Equipo</b>.</p>
@@ -335,6 +337,11 @@ function guiaView() {
       <li>También puedes cambiar la sede y el área de los colaboradores.</li></ul>
       <p><b>Malla de horarios.</b> En <b>Malla</b> puedes asignar el turno de cada persona, en todas las sedes, y usar <b>Copiar la semana anterior</b>. Debajo de la malla, en <b>Turnos</b>, también puedes ajustar el nombre y los horarios de cada turno de cualquier sede.</p>
       <p>Las cuentas de directoras, gerentes, administración y la tuya propia solo las cambia la administración.</p>` },
+    { id: 'g-mistareas', t: 'Mis tareas (proyectos)', si: !esGerencia() && S.pj.tengo, html: `
+      <p>Si la gerencia te asigna una actividad de un proyecto, aparece la pestaña <b>Mis tareas</b> con tus tarjetas.</p>
+      <ul><li><b>Arrastra</b> cada tarjeta a la columna que corresponda: Por hacer, En curso, En revisión o Hecho.</li>
+      <li>Ábrela para <b>actualizar el porcentaje de avance</b>, marcar o agregar <b>pasos</b> y escribir el <b>seguimiento</b> (qué hiciste, qué falta, novedades).</li>
+      <li>El título, las fechas y la prioridad los define la gerencia.</li></ul>` },
     { id: 'g-faq', t: 'Preguntas frecuentes', html: `
       <p><b>Olvidé mi contraseña.</b> Pídele a la gerencia que la restablezca; recibirás una temporal.</p>
       <p><b>¿Puedo marcar desde el celular?</b> ${S.config.validar_ip && S.config.validar_ip.activo ? 'No. Solo se puede marcar desde la oficina.' : 'Pronto solo se podrá marcar desde la oficina y tu computador asignado. Acostúmbrate a marcar desde tu puesto.'}</p>
@@ -1106,6 +1113,11 @@ const avanceProyecto = pid => { const ts = tareasDe(pid); return ts.length ? Mat
 const vencida = t => t.fecha_limite && t.columna !== 'hecho' && t.fecha_limite < fechaEn(miTz());
 const fechaCortaPj = d => d ? `${Number(d.slice(8))} ${MESES[Number(d.slice(5, 7)) - 1].slice(0, 3)}${d.slice(0, 4) !== fechaEn(miTz()).slice(0, 4) ? ' ' + d.slice(0, 4) : ''}` : '';
 const barraAvance = (v, grande) => `<div class="pj-barra ${grande ? 'grande' : ''}" role="progressbar" aria-valuenow="${v}" aria-valuemin="0" aria-valuemax="100"><span style="width:${v}%"></span></div>`;
+// Responsable: una persona de la intranet (responsable_id) o alguien externo (responsable_externo, texto libre).
+const respNombre = x => { const r = persona(x.responsable_id); return r ? r.nombre : x.responsable_externo ? x.responsable_externo : ''; };
+const respTxt = x => { const r = persona(x.responsable_id); return r ? esc(r.nombre) : x.responsable_externo ? `${esc(x.responsable_externo)} <span class="chip mute">externo</span>` : ''; };
+const respAvatar = x => { const n = respNombre(x); return n ? `<span class="avatar soft ${x.responsable_id ? '' : 'ext'}" title="${esc(n)}${x.responsable_id ? '' : ' (externo)'}">${initials(n)}</span>` : ''; };
+const opcionesResp = (x, editandoExt) => { const ext = editandoExt || (!x.responsable_id && x.responsable_externo); return opcionesPersonas(ext ? '__ext' : x.responsable_id) + `<option value="__ext" ${ext ? 'selected' : ''}>Externo (escribir nombre)…</option>`; };
 const opcionesPersonas = (sel, vacio = 'Sin responsable') => `<option value="">${vacio}</option>` + S.personas.filter(x => x.activo || x.id === sel).map(x => `<option value="${x.id}" ${x.id === sel ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('');
 
 async function cargarProyectos() {
@@ -1114,14 +1126,16 @@ async function cargarProyectos() {
     todas(() => sb.from('tareas').select('*').order('proyecto_id').order('orden').order('id'))
   ]);
   S.pj.lista = lista; S.pj.tareas = tareas;
+  if (!esGerencia()) { S.pj.tengo = tareas.length > 0; S.pj.actual = null; }
   if (S.pj.actual && !lista.some(p => p.id === S.pj.actual)) S.pj.actual = null;
-  const ids = S.pj.actual ? tareasDe(S.pj.actual).map(t => t.id) : [];
+  const ids = !esGerencia() ? tareas.map(t => t.id) : S.pj.actual ? tareasDe(S.pj.actual).map(t => t.id) : [];
   [S.pj.items, S.pj.coms] = ids.length ? await Promise.all([
     q(sb.from('tarea_items').select('*').in('tarea_id', ids).order('orden').order('id')),
     q(sb.from('tarea_comentarios').select('*').in('tarea_id', ids).order('creado'))
   ]) : [[], []];
 }
 function proyectosView() {
+  if (!esGerencia()) return misTareasView() + modalTarjetaView();
   return (S.pj.actual ? tableroView() : listaProyectosView()) + modalTarjetaView() + modalProyectoView();
 }
 function listaProyectosView() {
@@ -1131,17 +1145,18 @@ function listaProyectosView() {
   const prom = activos.length ? Math.round(activos.reduce((a, p) => a + avanceProyecto(p.id), 0) / activos.length) : 0;
   const kpi = (c, v, l, i) => `<div class="card kpi"><span class="sq ${c}">${ico(i)}</span><div><b class="num">${v}</b><br><span>${l}</span></div></div>`;
   const tarjeta = p => {
-    const ts = tareasDe(p.id), av = avanceProyecto(p.id), resp = persona(p.responsable_id), nv = ts.filter(vencida).length;
+    const ts = tareasDe(p.id), av = avanceProyecto(p.id), nv = ts.filter(vencida).length;
     return `<button type="button" class="card pj-card" data-pjabrir="${p.id}"><span class="pj-banda ${p.color}"></span>
       <h3>${esc(p.nombre)}</h3>${p.descripcion ? `<p>${esc(p.descripcion.length > 120 ? p.descripcion.slice(0, 117) + '…' : p.descripcion)}</p>` : ''}
-      <div class="pj-meta">${p.fecha_inicio || p.fecha_fin ? `<span>${ico('clock')} ${esc(fechaCortaPj(p.fecha_inicio) || '…')} – ${esc(fechaCortaPj(p.fecha_fin) || '…')}</span>` : ''}${resp ? `<span class="avatar soft" title="${esc(resp.nombre)}">${initials(resp.nombre)}</span>` : ''}</div>
+      <div class="pj-meta">${p.fecha_inicio || p.fecha_fin ? `<span>${ico('clock')} ${esc(fechaCortaPj(p.fecha_inicio) || '…')} – ${esc(fechaCortaPj(p.fecha_fin) || '…')}</span>` : ''}${respAvatar(p)}</div>
       <div class="pj-av"><b class="num">${av} %</b>${barraAvance(av)}</div>
       <div class="pj-cuenta">${COLUMNAS.map(([k, l]) => `<span title="${l}">${l}: <b>${ts.filter(t => t.columna === k).length}</b></span>`).join('')}${nv ? `<span class="chip bad">${nv} vencida${nv === 1 ? '' : 's'}</span>` : ''}</div></button>`;
   };
   const form = S.pj.nuevo ? `<form class="card compose" id="fProyecto" novalidate style="margin-bottom:22px"><div class="form-grid">
       <div class="field" style="grid-column:1/-1"><label for="pjNombre">Nombre del proyecto</label><input id="pjNombre" required maxlength="120" placeholder="Ej.: Lanzamiento de la nueva página web"></div>
       <div class="field" style="grid-column:1/-1"><label for="pjDesc">Descripción u objetivo</label><textarea id="pjDesc" rows="2" placeholder="¿Qué se quiere lograr?"></textarea></div>
-      <div class="field"><label for="pjResp">Responsable</label><select id="pjResp">${opcionesPersonas(P().id)}</select></div>
+      <div class="field"><label for="pjResp">Responsable</label><select id="pjResp">${opcionesPersonas(P().id)}<option value="__ext">Externo (escribir nombre)…</option></select>
+        <input id="pjRespExt" hidden maxlength="120" placeholder="Nombre del externo (persona o empresa)" style="margin-top:6px"></div>
       <div class="field"><label for="pjIni">Inicio</label><input id="pjIni" type="date"></div>
       <div class="field"><label for="pjFin">Fecha objetivo</label><input id="pjFin" type="date"></div>
       <div class="field"><span style="font-size:14px;font-weight:600;color:var(--navy)">Color</span><div class="pj-colores">${COLORES_PJ.map((c, i) => `<label class="${c}"><input type="radio" name="pjColor" value="${c}" ${i === S.pj.lista.length % 10 ? 'checked' : ''}><span></span></label>`).join('')}</div></div>
@@ -1157,17 +1172,10 @@ function listaProyectosView() {
 function tableroView() {
   const p = S.pj.lista.find(x => x.id === S.pj.actual); if (!p) return '';
   const filtro = norm(S.pj.filtro || ''), fr = S.pj.filtroResp || '';
-  const ts = tareasDe(p.id), vis = ts.filter(t => (!filtro || norm(`${t.titulo} ${t.descripcion || ''}`).includes(filtro)) && (!fr || t.responsable_id === fr));
-  const av = avanceProyecto(p.id), resp = persona(p.responsable_id), nv = ts.filter(vencida).length;
-  const items = id => S.pj.items.filter(i => i.tarea_id === id), coms = id => S.pj.coms.filter(c => c.tarea_id === id);
-  const card = t => {
-    const it = items(t.id), hechos = it.filter(i => i.hecho).length, r = persona(t.responsable_id), pr = PRIORIDAD[t.prioridad] || PRIORIDAD.media, a = avanceTarea(t);
-    return `<button type="button" class="kcard ${vencida(t) ? 'vencida' : ''}" draggable="true" data-arrastrar="${t.id}" data-tarjeta="${t.id}">
-      <span class="kcard-top"><span class="chip ${pr[0]}">${pr[1]}</span>${t.fecha_limite ? `<span class="kfecha ${vencida(t) ? 'mal' : ''}">${ico('clock')} ${esc(fechaCortaPj(t.fecha_limite))}</span>` : ''}</span>
-      <b>${esc(t.titulo)}</b>
-      ${a > 0 ? `<span class="kav"><span class="num">${a} %</span>${barraAvance(a)}</span>` : ''}
-      <span class="kcard-pie">${it.length ? `<span class="${hechos === it.length ? 'ok' : ''}">${ico('check')} ${hechos}/${it.length}</span>` : ''}${coms(t.id).length ? `<span>${ico('mega')} ${coms(t.id).length}</span>` : ''}<span style="flex:1"></span>${r ? `<span class="avatar soft" title="${esc(r.nombre)}">${initials(r.nombre)}</span>` : ''}</span></button>`;
-  };
+  const ts = tareasDe(p.id), vis = ts.filter(t => (!filtro || norm(`${t.titulo} ${t.descripcion || ''}`).includes(filtro)) && filtraResp(t, fr));
+  const av = avanceProyecto(p.id), nv = ts.filter(vencida).length;
+  const externos = [...new Set(ts.filter(t => !t.responsable_id && t.responsable_externo).map(t => t.responsable_externo))].sort();
+  const card = t => tarjetaKanban(t, false);
   const col = ([k, l]) => {
     const lista = vis.filter(t => t.columna === k).sort((a, b) => a.orden - b.orden || a.id - b.id);
     return `<section class="kcol" data-columna="${k}"><header><b>${l}</b><span class="num">${ts.filter(t => t.columna === k).length}</span></header>
@@ -1178,43 +1186,72 @@ function tableroView() {
   return `<div class="pj-cabeza"><button type="button" class="link" data-accion="pjVolver">‹ Todos los proyectos</button>
       <div class="hello" style="margin-bottom:16px"><div><div class="eyebrow"><span class="pj-punto ${p.color}"></span> Proyecto${p.archivado ? ' · archivado' : ''}</div><h1>${esc(p.nombre)}</h1>
         ${p.descripcion ? `<p>${esc(p.descripcion)}</p>` : ''}
-        <p class="hint" style="margin-top:6px">${resp ? `Responsable: <b>${esc(resp.nombre)}</b>` : 'Sin responsable'}${p.fecha_inicio || p.fecha_fin ? ` · ${esc(fechaCortaPj(p.fecha_inicio) || '…')} – ${esc(fechaCortaPj(p.fecha_fin) || '…')}` : ''}</p></div>
+        <p class="hint" style="margin-top:6px">${respNombre(p) ? `Responsable: <b>${respTxt(p)}</b>` : 'Sin responsable'}${p.fecha_inicio || p.fecha_fin ? ` · ${esc(fechaCortaPj(p.fecha_inicio) || '…')} – ${esc(fechaCortaPj(p.fecha_fin) || '…')}` : ''}</p></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" type="button" data-accion="pjEditar">Editar proyecto</button></div></div></div>
     <div class="pj-resumen card"><div class="pj-av grande"><span>Avance del proyecto</span><b class="num">${av} %</b>${barraAvance(av, true)}</div>
       ${COLUMNAS.map(([k, l]) => `<div><span>${l}</span><b class="num">${ts.filter(t => t.columna === k).length}</b></div>`).join('')}
       <div><span>Vencidas</span><b class="num" style="color:${nv ? 'var(--bad)' : 'inherit'}">${nv}</b></div></div>
     <div class="toolbar" style="margin:16px 0"><div class="search" style="flex:0 1 280px">${ico('search')}<input id="pjFiltro" type="search" placeholder="Buscar tarjeta" value="${esc(S.pj.filtro || '')}" aria-label="Buscar tarjeta"></div>
-      <select id="pjFiltroResp" aria-label="Filtrar por responsable"><option value="">Todos los responsables</option>${S.personas.filter(x => ts.some(t => t.responsable_id === x.id)).map(x => `<option value="${x.id}" ${fr === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select>
+      <select id="pjFiltroResp" aria-label="Filtrar por responsable"><option value="">Todos los responsables</option>${S.personas.filter(x => ts.some(t => t.responsable_id === x.id)).map(x => `<option value="${x.id}" ${fr === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}${externos.map(n => `<option value="ext:${esc(n)}" ${fr === 'ext:' + n ? 'selected' : ''}>${esc(n)} (externo)</option>`).join('')}</select>
       <span class="hint">Arrastra las tarjetas entre columnas o ábrelas para ver el detalle.</span></div>
     <div class="kanban">${COLUMNAS.map(col).join('')}</div>`;
+}
+const filtraResp = (t, fr) => !fr || (fr.startsWith('ext:') ? !t.responsable_id && t.responsable_externo === fr.slice(4) : t.responsable_id === fr);
+function tarjetaKanban(t, conProyecto) {
+  const it = S.pj.items.filter(i => i.tarea_id === t.id), nc = S.pj.coms.filter(c => c.tarea_id === t.id).length;
+  const hechos = it.filter(i => i.hecho).length, pr = PRIORIDAD[t.prioridad] || PRIORIDAD.media, a = avanceTarea(t);
+  const pj = conProyecto && S.pj.lista.find(x => x.id === t.proyecto_id);
+  return `<button type="button" class="kcard ${vencida(t) ? 'vencida' : ''}" draggable="true" data-arrastrar="${t.id}" data-tarjeta="${t.id}">
+      ${pj ? `<span class="kproyecto"><span class="pj-punto ${pj.color}"></span> ${esc(pj.nombre)}</span>` : ''}
+      <span class="kcard-top"><span class="chip ${pr[0]}">${pr[1]}</span>${t.fecha_limite ? `<span class="kfecha ${vencida(t) ? 'mal' : ''}">${ico('clock')} ${esc(fechaCortaPj(t.fecha_limite))}</span>` : ''}</span>
+      <b>${esc(t.titulo)}</b>
+      ${a > 0 ? `<span class="kav"><span class="num">${a} %</span>${barraAvance(a)}</span>` : ''}
+      <span class="kcard-pie">${it.length ? `<span class="${hechos === it.length ? 'ok' : ''}">${ico('check')} ${hechos}/${it.length}</span>` : ''}${nc ? `<span>${ico('mega')} ${nc}</span>` : ''}<span style="flex:1"></span>${conProyecto ? '' : respAvatar(t)}</span></button>`;
+}
+// Vista para quien no es gerencia: solo las tarjetas que tiene asignadas, de todos los proyectos.
+function misTareasView() {
+  const fp = Number(S.pj.filtroPj) || 0, ts = S.pj.tareas.filter(t => !fp || t.proyecto_id === fp);
+  const abiertas = S.pj.tareas.filter(t => t.columna !== 'hecho').length, venc = S.pj.tareas.filter(vencida).length;
+  const col = ([k, l]) => `<section class="kcol" data-columna="${k}"><header><b>${l}</b><span class="num">${ts.filter(t => t.columna === k).length}</span></header>
+      <div class="klista">${ts.filter(t => t.columna === k).sort((a, b) => a.orden - b.orden || a.id - b.id).map(t => tarjetaKanban(t, true)).join('') || '<p class="hint" style="margin:4px">—</p>'}</div></section>`;
+  return `<div class="hello"><div><div class="eyebrow">Proyectos</div><h1>Mis <em>tareas</em></h1>
+      <p>Estas son las actividades de proyectos que la gerencia te asignó. Muévelas de columna, actualiza el avance, marca los pasos y registra el seguimiento.</p></div></div>
+    <div class="toolbar" style="margin:0 0 16px"><select id="pjFiltroPj" aria-label="Filtrar por proyecto"><option value="">Todos los proyectos</option>${S.pj.lista.map(p => `<option value="${p.id}" ${fp === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select>
+      <span class="hint">${abiertas} abierta${abiertas === 1 ? '' : 's'}${venc ? ` · <b style="color:var(--bad)">${venc} vencida${venc === 1 ? '' : 's'}</b>` : ''} · Arrastra las tarjetas entre columnas o ábrelas para ver el detalle.</span></div>
+    ${S.pj.tareas.length ? `<div class="kanban">${COLUMNAS.map(col).join('')}</div>` : '<div class="card vacio">No tienes tareas asignadas en este momento.</div>'}`;
 }
 function modalTarjetaView() {
   const t = S.pj.tareas.find(x => x.id === S.pj.abierta); if (!t) return '';
   const it = S.pj.items.filter(i => i.tarea_id === t.id), cm = S.pj.coms.filter(c => c.tarea_id === t.id).slice().reverse();
   const hechos = it.filter(i => i.hecho).length, sugerido = it.length ? Math.round(hechos / it.length * 100) : null;
   const sel = (campo, opciones, val) => `<select data-tcampo="${campo}">${opciones.map(([k, l]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const ger = esGerencia(), pj = S.pj.lista.find(x => x.id === t.proyecto_id), ext = S.pj.extEdit === t.id || (!t.responsable_id && t.responsable_externo);
+  const dato = (l, v) => `<div class="field"><label>${l}</label><div class="dato">${v || '<span class="hint">—</span>'}</div></div>`;
   return `<div class="modal-fondo" data-cerrarmodal><div class="modal card" role="dialog" aria-modal="true" aria-label="Tarjeta">
-    <div class="modal-cabeza"><input class="modal-titulo" data-tcampo="titulo" value="${esc(t.titulo)}" aria-label="Título de la tarjeta"><button class="btn ghost sm" type="button" data-accion="cerrarModal">Cerrar</button></div>
+    <div class="modal-cabeza"><div style="flex:1;min-width:0">${!ger && pj ? `<div class="eyebrow" style="padding-left:8px"><span class="pj-punto ${pj.color}"></span> ${esc(pj.nombre)}</div>` : ''}${ger ? `<input class="modal-titulo" data-tcampo="titulo" value="${esc(t.titulo)}" aria-label="Título de la tarjeta">` : `<h2 class="modal-titulo" style="border:0">${esc(t.titulo)}</h2>`}</div><button class="btn ghost sm" type="button" data-accion="cerrarModal">Cerrar</button></div>
     <div class="modal-cuerpo"><div class="modal-principal">
       <div class="form-grid">
         <div class="field"><label>Columna</label>${sel('columna', COLUMNAS, t.columna)}</div>
-        <div class="field"><label>Responsable</label><select data-tcampo="responsable_id">${opcionesPersonas(t.responsable_id)}</select></div>
+        ${ger ? `<div class="field"><label>Responsable</label><select data-tcampo="responsable_id">${opcionesResp(t, S.pj.extEdit === t.id)}</select>
+          ${ext ? `<input data-tcampo="responsable_externo" maxlength="120" placeholder="Nombre del externo (persona o empresa)" value="${esc(t.responsable_externo || '')}" style="margin-top:6px">` : ''}</div>
         <div class="field"><label>Prioridad</label>${sel('prioridad', [['alta', 'Alta'], ['media', 'Media'], ['baja', 'Baja']], t.prioridad)}</div>
         <div class="field"><label>Inicio</label><input type="date" data-tcampo="fecha_inicio" value="${t.fecha_inicio || ''}"></div>
-        <div class="field"><label>Fecha límite</label><input type="date" data-tcampo="fecha_limite" value="${t.fecha_limite || ''}"></div>
+        <div class="field"><label>Fecha límite</label><input type="date" data-tcampo="fecha_limite" value="${t.fecha_limite || ''}"></div>`
+        : dato('Responsable', respTxt(t)) + dato('Prioridad', (PRIORIDAD[t.prioridad] || PRIORIDAD.media)[1]) + dato('Inicio', esc(fechaCortaPj(t.fecha_inicio))) + dato('Fecha límite', t.fecha_limite ? `<span style="${vencida(t) ? 'color:var(--bad);font-weight:600' : ''}">${esc(fechaCortaPj(t.fecha_limite))}</span>` : '')}
       </div>
       <div class="field"><label for="tAvance">Avance: <b id="tAvanceTxt">${avanceTarea(t)} %</b>${sugerido != null && sugerido !== avanceTarea(t) ? ` <button type="button" class="link" data-avancesugerido="${sugerido}" style="font-size:13px">usar ${sugerido} % según la lista</button>` : ''}</label>
         <input id="tAvance" type="range" min="0" max="100" step="5" value="${avanceTarea(t)}" data-tcampo="avance" ${t.columna === 'hecho' ? 'disabled' : ''}>${t.columna === 'hecho' ? '<span class="hint">Las tarjetas en Hecho cuentan como 100 %.</span>' : ''}</div>
-      <div class="field"><label>Descripción</label><textarea data-tcampo="descripcion" rows="4" placeholder="Detalles, enlaces, acuerdos…">${esc(t.descripcion || '')}</textarea></div>
+      ${ger ? `<div class="field"><label>Descripción</label><textarea data-tcampo="descripcion" rows="4" placeholder="Detalles, enlaces, acuerdos…">${esc(t.descripcion || '')}</textarea></div>`
+        : t.descripcion ? `<div class="field"><label>Descripción</label><div class="dato" style="white-space:pre-wrap">${esc(t.descripcion)}</div></div>` : ''}
       <div class="field"><label>Lista de pasos ${it.length ? `<span class="hint">${hechos}/${it.length}</span>` : ''}</label>
-        <div class="checklist">${it.map(i => `<div class="ck ${i.hecho ? 'hecho' : ''}"><label><input type="checkbox" data-item="${i.id}" ${i.hecho ? 'checked' : ''}> <span>${esc(i.texto)}</span></label><button type="button" class="link" data-borraritem="${i.id}" aria-label="Quitar paso">×</button></div>`).join('')}</div>
+        <div class="checklist">${it.map(i => `<div class="ck ${i.hecho ? 'hecho' : ''}"><label><input type="checkbox" data-item="${i.id}" ${i.hecho ? 'checked' : ''}> <span>${esc(i.texto)}</span></label>${ger ? `<button type="button" class="link" data-borraritem="${i.id}" aria-label="Quitar paso">×</button>` : ''}</div>`).join('')}</div>
         <form id="fItem" class="fila-form" novalidate><input name="texto" placeholder="Agregar un paso" required><button class="btn ghost sm" type="submit">Agregar</button></form></div>
     </div><aside class="modal-lado">
       <b class="lado-titulo">Seguimiento</b>
       <form id="fComentario" novalidate><textarea name="texto" rows="3" placeholder="Escribe un avance, un acuerdo o una novedad" required></textarea><button class="btn sm teal" type="submit">Registrar</button></form>
       <div class="seguimiento">${cm.map(c => { const a = persona(c.autor_id); return `<div class="seg-item"><span class="avatar soft">${initials(a ? a.nombre : '?')}</span><div><b>${esc(a ? a.nombre : 'Alguien')}</b> <span class="hint">${esc(cuando(c.creado))}</span><p>${esc(c.texto)}</p></div></div>`; }).join('') || '<p class="hint">Todavía no hay seguimiento en esta tarjeta.</p>'}</div>
       <p class="hint">Creada ${esc(cuando(t.creado))}</p>
-      <button type="button" class="btn sm danger" data-borrartarjeta="${t.id}">${ico('trash')} Eliminar tarjeta</button>
+      ${ger ? `<button type="button" class="btn sm danger" data-borrartarjeta="${t.id}">${ico('trash')} Eliminar tarjeta</button>` : ''}
     </aside></div></div></div>`;
 }
 function modalProyectoView() {
@@ -1224,7 +1261,8 @@ function modalProyectoView() {
     <div class="form-grid">
       <div class="field" style="grid-column:1/-1"><label>Nombre</label><input data-pjcampo="nombre" value="${esc(p.nombre)}"></div>
       <div class="field" style="grid-column:1/-1"><label>Descripción u objetivo</label><textarea data-pjcampo="descripcion" rows="3">${esc(p.descripcion || '')}</textarea></div>
-      <div class="field"><label>Responsable</label><select data-pjcampo="responsable_id">${opcionesPersonas(p.responsable_id)}</select></div>
+      <div class="field"><label>Responsable</label><select data-pjcampo="responsable_id">${opcionesResp(p, S.pj.extEditP === p.id)}</select>
+        ${S.pj.extEditP === p.id || (!p.responsable_id && p.responsable_externo) ? `<input data-pjcampo="responsable_externo" maxlength="120" placeholder="Nombre del externo (persona o empresa)" value="${esc(p.responsable_externo || '')}" style="margin-top:6px">` : ''}</div>
       <div class="field"><label>Inicio</label><input type="date" data-pjcampo="fecha_inicio" value="${p.fecha_inicio || ''}"></div>
       <div class="field"><label>Fecha objetivo</label><input type="date" data-pjcampo="fecha_fin" value="${p.fecha_fin || ''}"></div>
       <div class="field"><span style="font-size:14px;font-weight:600;color:var(--navy)">Color</span><div class="pj-colores">${COLORES_PJ.map(c => `<label class="${c}"><input type="radio" name="pjColorEd" data-pjcampo="color" value="${c}" ${c === p.color ? 'checked' : ''}><span></span></label>`).join('')}</div></div>
@@ -1274,7 +1312,8 @@ document.addEventListener('submit', async e => {
     const nombre = f.querySelector('#pjNombre').value.trim(); if (!nombre) { toast('Escribe el nombre del proyecto.'); return; }
     ocupado(btn, true);
     try {
-      const nuevo = await q(sb.from('proyectos').insert({ nombre, descripcion: f.querySelector('#pjDesc').value.trim() || null, responsable_id: f.querySelector('#pjResp').value || null,
+      const nuevo = await q(sb.from('proyectos').insert({ nombre, descripcion: f.querySelector('#pjDesc').value.trim() || null, responsable_id: ['', '__ext'].includes(f.querySelector('#pjResp').value) ? null : f.querySelector('#pjResp').value,
+        responsable_externo: f.querySelector('#pjResp').value === '__ext' ? (f.querySelector('#pjRespExt').value.trim() || null) : null,
         fecha_inicio: f.querySelector('#pjIni').value || null, fecha_fin: f.querySelector('#pjFin').value || null,
         color: (f.querySelector('input[name=pjColor]:checked') || {}).value || 'f0', archivado: false, orden: 0 }).select('id').single());
       Object.assign(S.pj, { nuevo: false, actual: nuevo.id, nuevaCol: 'pendiente' }); await cargarProyectos(); render();
@@ -1396,7 +1435,7 @@ document.addEventListener('click', async e => {
   if (a === 'pjVerArch') { S.pj.verArch = !S.pj.verArch; render(); return; }
   if (a === 'pjEditar') { S.pj.editProyecto = S.pj.actual; render(); return; }
   if (a === 'pjNuevaCancelar') { S.pj.nuevaCol = null; render(); return; }
-  if (a === 'cerrarModal') { S.pj.abierta = null; S.pj.editProyecto = null; render(); return; }
+  if (a === 'cerrarModal') { Object.assign(S.pj, { abierta: null, editProyecto: null, extEdit: null, extEditP: null }); render(); return; }
   if (a === 'exportarAsistencia') { exportarAsistencia(); return; }
   if (b.dataset.comf) {
     S.com.filtro = b.dataset.comf;
@@ -1539,17 +1578,32 @@ document.addEventListener('change', async e => {
       const t = S.pj.tareas.find(x => x.id === S.pj.abierta), campo = el.dataset.tcampo; let v = el.value;
       if (campo === 'titulo' && !v.trim()) { render(); return; }
       if (campo === 'columna') { await pjMover(t.id, v); return; }
+      if (campo === 'responsable_id') {
+        if (v === '__ext') { S.pj.extEdit = t.id; render(); document.querySelector('[data-tcampo=responsable_externo]')?.focus(); return; }
+        S.pj.extEdit = null; await pjGuardar('tareas', t.id, { responsable_id: v || null, responsable_externo: null, actualizado: new Date().toISOString() }); return;
+      }
+      if (campo === 'responsable_externo') {
+        v = v.trim(); S.pj.extEdit = null;
+        await pjGuardar('tareas', t.id, v ? { responsable_externo: v, responsable_id: null, actualizado: new Date().toISOString() } : { responsable_externo: null, actualizado: new Date().toISOString() }); return;
+      }
       if (campo === 'avance') v = Number(v); else if (['responsable_id', 'fecha_inicio', 'fecha_limite', 'descripcion'].includes(campo)) v = v.trim() || null; else v = v.trim();
       await pjGuardar('tareas', t.id, { [campo]: v, actualizado: new Date().toISOString() }); return;
     }
     if (el.dataset.item) { await pjGuardar('tarea_items', Number(el.dataset.item), { hecho: el.checked }); return; }
     if (el.dataset.pjcampo) {
       const campo = el.dataset.pjcampo; let v = el.value.trim();
+      if (campo === 'responsable_id') {
+        if (v === '__ext') { S.pj.extEditP = S.pj.editProyecto; render(); document.querySelector('[data-pjcampo=responsable_externo]')?.focus(); return; }
+        S.pj.extEditP = null; await pjGuardar('proyectos', S.pj.editProyecto, { responsable_id: v || null, responsable_externo: null }); return;
+      }
+      if (campo === 'responsable_externo') { S.pj.extEditP = null; await pjGuardar('proyectos', S.pj.editProyecto, v ? { responsable_externo: v, responsable_id: null } : { responsable_externo: null }); return; }
       if (campo === 'nombre' && !v) { render(); return; }
       if (campo !== 'nombre' && campo !== 'color') v = v || null;
       await pjGuardar('proyectos', S.pj.editProyecto, { [campo]: v }); return;
     }
     if (el.id === 'pjFiltroResp') { S.pj.filtroResp = el.value; render(); return; }
+    if (el.id === 'pjFiltroPj') { S.pj.filtroPj = el.value; render(); return; }
+    if (el.id === 'pjResp') { const x = document.getElementById('pjRespExt'); x.hidden = el.value !== '__ext'; if (!x.hidden) x.focus(); return; }
     if (el.dataset.celda) {
       const [tipo, pid, k] = el.dataset.celda.split('|'), v = el.value;
       S.malla.guardando = true;

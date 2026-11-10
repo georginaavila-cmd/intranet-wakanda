@@ -38,6 +38,9 @@
     }
   });
   DB.perfiles.filter(x => x.id !== ADMIN).forEach(x => { const M = DB.turnos.find(t => t.sede_id === x.sede_id && t.codigo === 'M'), Sa = DB.turnos.find(t => t.sede_id === x.sede_id && t.codigo === 'S'); for (let d = 1; d <= 5; d++) DB.horario_base.push({ persona_id: x.id, dia: d, turno_id: M.id }); DB.horario_base.push({ persona_id: x.id, dia: 6, turno_id: Sa.id }); });
+  DB.proyectos.push({ id: 1, nombre: 'Nueva página web', descripcion: 'Rediseño del sitio de la agencia', color: 'f3', responsable_id: ADMIN, responsable_externo: null, fecha_inicio: null, fecha_fin: '2027-03-31', archivado: false, orden: 0, creado: new Date().toISOString() });
+  [['Fotos de destinos', '00000000-0000-0000-0000-000000000110', null, 'en_curso', 30], ['Desarrollo del sitio', null, 'Agencia Pixel', 'pendiente', 0], ['Textos de paquetes', '00000000-0000-0000-0000-000000000110', null, 'pendiente', 0], ['Aprobar diseño', ADMIN, null, 'revision', 80]]
+    .forEach(([titulo, rid, ext, columna, avance], i) => DB.tareas.push({ id: i + 1, proyecto_id: 1, titulo, descripcion: null, columna, orden: i, responsable_id: rid, responsable_externo: ext, fecha_inicio: null, fecha_limite: i === 0 ? '2026-12-15' : null, prioridad: 'media', avance, creado: new Date().toISOString(), actualizado: new Date().toISOString() }));
   let sesion = null, meta = { debe_cambiar_contrasena: true };
   class Q {
     constructor(t) { this.t = t; this.f = []; this.op = 'select'; this.one = false; }
@@ -58,7 +61,13 @@
       if (this.op === 'upsert') { for (const v of this.v) { const i = T.findIndex(r => this.k.every(k => String(r[k]) === String(v[k]))); if (i >= 0) T[i] = { ...T[i], ...v }; else T.push(v); } return { data: null, error: null }; }
       if (this.op === 'update') { T.filter(m).forEach(r => Object.assign(r, this.v)); return { data: null, error: null }; }
       if (this.op === 'delete') { DB[this.t] = T.filter(r => !m(r)); return { data: null, error: null }; }
-      const rows = T.filter(m).map(r => ({ ...r }));
+      let rows = T.filter(m).map(r => ({ ...r }));
+      // RLS simulada de Proyectos: quien no es gerencia solo ve sus tarjetas asignadas.
+      const yo = sesion && DB.perfiles.find(x => x.id === sesion.user.id), ger = yo && (yo.rol === 'gerente' || yo.es_admin);
+      if (yo && !ger && ['proyectos', 'tareas', 'tarea_items', 'tarea_comentarios'].includes(this.t)) {
+        const mias = DB.tareas.filter(t => t.responsable_id === yo.id);
+        rows = rows.filter(r => this.t === 'tareas' ? r.responsable_id === yo.id : this.t === 'proyectos' ? mias.some(t => t.proyecto_id === r.id) : mias.some(t => t.id === r.tarea_id));
+      }
       const out = this.rg ? rows.slice(this.rg[0], this.rg[1] + 1) : rows;
       return { data: this.one ? (out[0] || null) : out, error: null };
     }

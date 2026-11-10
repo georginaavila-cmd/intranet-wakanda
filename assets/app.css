@@ -159,3 +159,7 @@ table.malla select.shift { min-width: 92px; max-width: 220px; text-align-last: l
 #fComentario { display: grid; gap: 8px; justify-items: start; }
 .modal textarea, .fila-form input, .knueva textarea { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font: inherit; font-size: 14px; background: #fff; color: var(--ink); }
 .modal textarea:focus, .fila-form input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(0,163,155,.15); }
+.avatar.ext { background: #fdeedd; color: #8a4b08; }
+.kproyecto { font-size: 11.5px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.kproyecto .pj-punto { width: 9px; height: 9px; border-radius: 3px; }
+.dato { min-height: 42px; display: flex; align-items: center; gap: 6px; padding: 0 2px; font-size: 15px; color: var(--ink); }
