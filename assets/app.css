@@ -167,3 +167,5 @@ table.malla select.shift { min-width: 92px; max-width: 220px; text-align-last: l
 .alerta.roja .sq { color: #c62828; }
 .alerta.roja > div > b { color: #b71c1c; }
 .tabs .badge.roja { background: #c62828; color: #fff; }
+.alerta.nueva { background: #e6f6f5; border-color: #9fdcd7; border-left-color: var(--teal); }
+.alerta.nueva .sq { color: var(--teal); }
