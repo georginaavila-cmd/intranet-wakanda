@@ -137,7 +137,9 @@ const puedeTocarCuenta = x => x.id !== P().id && (P().es_admin || (x.rol === 'co
 // Los supervisores también editan los horarios de los turnos, en todas las sedes.
 const editaMalla = sedeId => lideraSede(sedeId) || P().rol === 'supervisor';
 // Quien marca asistencia: todos menos la gerencia (no marca y no debe afectar los indicadores).
-const marcaAsistencia = x => x.rol !== 'gerente';
+// Quién cuenta en asistencia e informes: todos menos la gerencia que no tiene horario.
+// Si a alguien con rol gerente se le asigna horario (fijo o en la malla), sí se le controla la asistencia.
+const marcaAsistencia = (x, malla) => x.rol !== 'gerente' || (malla || []).some(r => r.persona_id === x.id);
 const esLider = () => esGerencia() || P().rol === 'directora';
 const lideraSede = sedeId => esGerencia() || (P().rol === 'directora' && P().sede_id === sedeId);
 const sede = id => S.sedes.find(s => s.id === id) || { nombre: '—', zona_horaria: 'America/Bogota' };
@@ -333,6 +335,7 @@ function guiaView() {
       <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li>
       <li><b>Rol Supervisor:</b> asígnalo a quien deba crear y administrar cuentas de colaboradores (por ejemplo, contabilidad). No le da acceso a informes, aprobaciones ni configuración.</li></ul>` : ''}
       <p><b>Solicitudes.</b> En <b>Solicitudes</b> activas o apagas el módulo para todo el equipo y asignas los <b>revisores</b>: quién puede ver, aprobar y rechazar, por sede y por tipo (por ejemplo, contabilidad para incapacidades). Las directoras solo revisan si las asignas. Nadie aprueba sus propias solicitudes.</p>
+      <p><b>Asistencia a Excel.</b> En <b>Asistencia</b>, el botón <b>Exportar a Excel</b> pide un rango de fechas (o <b>Este mes</b> / <b>Mes pasado</b>) y descarga una fila por persona y por día con turno, horas, estado y novedades. Incluye a todos los colaboradores, también a quien no tiene horario fijo (sale como "Sin turno"), y verifica que no falte ninguno. Las personas con rol gerente solo aparecen si tienen horario asignado.</p>
       <p><b>Informes.</b> Ves ambas sedes o una sola, con los indicadores del mes, la gráfica por día, el ranking de llegadas tarde y la confirmación de comunicados.</p>` },
     { id: 'g-proyectos', t: 'Proyectos (tablero de gerencia)', si: esGerencia(), html: `
       <p>La pestaña <b>Proyectos</b> solo la ve la gerencia. Sirve para planear y seguir los proyectos de la agencia, al estilo de un tablero de tarjetas.</p>
@@ -576,22 +579,25 @@ async function cargarAsistencia() {
   const { data: aus } = await sb.rpc('ausencias_aprobadas', { p_desde: desde, p_hasta: hasta });
   S.asistencia = { malla, marcas, ausencias: aus || [] };
 }
-function estadoPersona(x) {
+function estadoPersona(x) { return estadoEn(x, diaAsistencia(sede(x.sede_id).zona_horaria), S.asistencia); }
+// Estado de una persona en un día, con los datos A = { malla, marcas, ausencias }.
+function estadoEn(x, hoy, A) {
   // En días pasados el día ya cerró (cuenta como si fueran las 24:00); en días futuros aún no empieza.
-  const tz = sede(x.sede_id).zona_horaria, hoyReal = fechaEn(tz), hoy = diaAsistencia(tz);
+  const tz = sede(x.sede_id).zona_horaria, hoyReal = fechaEn(tz);
   const ahora = hoy < hoyReal ? 24 * 60 : hoy > hoyReal ? -1 : toMin(horaEn(tz));
-  const r = S.asistencia.malla.find(y => y.persona_id === x.id && y.fecha === hoy), t = r ? turno(r.turno_id) : null;
-  const m = Object.fromEntries(S.asistencia.marcas.filter(y => y.persona_id === x.id && y.fecha === hoy).map(y => [y.tipo, toMin(horaEn(tz, new Date(y.hora)))]));
+  const r = A.malla.find(y => y.persona_id === x.id && y.fecha === hoy), t = r ? turno(r.turno_id) : null;
+  const m = Object.fromEntries(A.marcas.filter(y => y.persona_id === x.id && y.fecha === hoy).map(y => [y.tipo, toMin(horaEn(tz, new Date(y.hora)))]));
   let est;
-  const aus = (S.asistencia.ausencias || []).find(a => a.persona_id === x.id && a.desde <= hoy && hoy <= a.hasta);
+  const aus = (A.ausencias || []).find(a => a.persona_id === x.id && a.desde <= hoy && hoy <= a.hasta);
   if (aus) est = ['info', TIPOS[aus.tipo].estado];
   else if (t && !t.entrada) est = ['mute', t.nombre];
   else if (m.entrada == null) est = !t ? (ahora > 12 * 60 ? ['bad', 'Sin turno ni marca'] : ['mute', 'Sin turno']) : ahora < toMin(t.entrada) ? ['mute', 'Aún no inicia'] : ahora > toMin(t.entrada) + 15 ? ['bad', 'Sin marcar entrada'] : ['info', 'Por llegar'];
+  else if (!t) est = ['info', 'Marcó sin horario asignado'];
   else { est = ['ok', 'Al día']; for (const p of PASOS) if (m[p.k] != null) { const ev = evaluar(p.k, m[p.k], t, m); if (ev && ev[0] === 'warn') est = ev; } }
   return { t, m, est };
 }
 function asistenciaView() {
-  const gente = S.personas.filter(x => x.activo && marcaAsistencia(x) && lideraSede(x.sede_id));
+  const gente = S.personas.filter(x => x.activo && marcaAsistencia(x, S.asistencia.malla) && lideraSede(x.sede_id));
   const filas = gente.map(x => ({ x, ...estadoPersona(x) }));
   const cnt = k => filas.filter(f => f.est[0] === k).length;
   const fmt = v => v == null ? '' : `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
@@ -609,9 +615,10 @@ function asistenciaView() {
         ${esHoy ? '' : '<button class="btn ghost sm" type="button" data-asisdia="0">Hoy</button>'}
         <button class="btn ghost sm" type="button" data-accion="recargarAsistencia">Actualizar</button>
         <button class="btn ghost sm" type="button" data-accion="exportarAsistencia">${ico('file')} Exportar a Excel</button></div></div>
+    ${S.asisExp ? exportarAsistenciaView() : ''}
     <div class="kpis">${kpi('ok', cnt('ok'), 'Al día', 'check')}${kpi('warn', cnt('warn'), 'Con novedad', 'alert')}${kpi('bad', cnt('bad'), 'Sin marcar entrada', 'x')}${kpi('mute', cnt('mute') + cnt('info'), 'Descanso o por llegar', 'moon')}</div>
     <div class="card tablewrap"><table><thead><tr><th>Persona</th><th>Turno</th><th>Entrada</th><th>Sale a almorzar</th><th>Regresa</th><th>Salida</th><th>Estado</th></tr></thead><tbody>
-      ${filas.map(f => `<tr><td><div class="person"><div class="avatar soft">${initials(f.x.nombre)}</div><div><b>${esc(f.x.nombre)}</b><small>${esc(area(f.x.area_id).nombre)} · ${esc(sede(f.x.sede_id).nombre)}</small></div></div></td>
+      ${filas.map(f => `<tr><td><div class="person"><div class="avatar soft">${initials(f.x.nombre)}</div><div><b>${esc(f.x.nombre)}</b><small>${esc(area(f.x.area_id).nombre)} · ${esc(sede(f.x.sede_id).nombre)}${S.asistencia.malla.some(r => r.persona_id === f.x.id) ? '' : ' · <span style="color:var(--bad)">sin horario fijo</span>'}</small></div></div></td>
         <td><span class="chip ${claseTurno(f.t)}">${f.t ? esc(f.t.nombre) : 'Sin turno'}</span>${f.t && f.t.entrada ? `<div class="hint num">${hhmm(f.t.entrada)}–${hhmm(f.t.salida)}</div>` : ''}</td>
         ${PASOS.map(p => celda(f, p)).join('')}<td><span class="chip ${f.est[0]}">${esc(f.est[1])}</span></td></tr>`).join('') || '<tr><td colspan="7" class="vacio">No hay personas en tu sede todavía.</td></tr>'}
     </tbody></table></div>`;
@@ -938,7 +945,9 @@ async function cargarInforme() {
 }
 function calcularInforme() {
   const D = S.inf.datos, T = tol();
-  const gente = S.personas.filter(x => marcaAsistencia(x) && lideraSede(x.sede_id) && (!S.inf.sede || x.sede_id === S.inf.sede) && (!S.inf.area || x.area_id === S.inf.area) && D.malla.some(r => r.persona_id === x.id));
+  // Todos los que tienen horario o marcaron en el período (también quien no tiene horario fijo asignado).
+  const gente = S.personas.filter(x => marcaAsistencia(x, D.malla) && lideraSede(x.sede_id) && (!S.inf.sede || x.sede_id === S.inf.sede) && (!S.inf.area || x.area_id === S.inf.area)
+    && (D.malla.some(r => r.persona_id === x.id) || D.marcas.some(r => r.persona_id === x.id) || x.activo));
   const ids = new Set(gente.map(x => x.id));
   const st = Object.fromEntries(gente.map(x => [x.id, { p: x, dias: 0, tardes: 0, minT: 0, almL: 0, temp: 0, extra: 0, aus: 0, just: 0, sinConf: 0, detalle: [] }]));
   const marcasDe = {};
@@ -961,6 +970,10 @@ function calcularInforme() {
       if (dur > perm + T.almuerzo) { s2.almL++; s2.detalle.push({ f: r.fecha, txt: `Almuerzo ${dur} min`, cls: 'warn' }); }
     }
     if (mk.salida != null) { const d = mk.salida - toMin(t.salida); if (d < 0) { s2.temp++; s2.detalle.push({ f: r.fecha, txt: `Salió ${-d} min antes`, cls: 'warn' }); } else if (d > 30) s2.extra += d; }
+  }
+  // Quien no tiene horario no se puede medir contra un turno: se cuentan solo los días que marcó entrada.
+  for (const x of gente) if (!D.malla.some(r => r.persona_id === x.id)) {
+    st[x.id].sinHorario = true; st[x.id].marcados = new Set(D.marcas.filter(r => r.persona_id === x.id && r.tipo === 'entrada').map(r => r.fecha)).size;
   }
   const coms = S.com.lista.filter(c => c.requiere_confirmacion && (c => { const f = fechaEn(miTz(), new Date(c.creado)); return f >= D.desde && f <= D.hasta; })(c)).map(c => {
     const dest = destinatarios(c).filter(x => ids.has(x.id));
@@ -1039,31 +1052,65 @@ function informesView() {
     <section style="margin-top:28px"><div class="sec-h"><h2>Detalle por persona</h2><span class="hint">Solo aparecen quienes tienen turnos en la malla del mes · toca una columna para ordenar o una fila para ver sus días</span></div>
       <div class="card tablewrap"><table><thead><tr><th>Persona</th><th class="n">Jornadas</th>${th('tardes', 'Llegadas tarde')}${th('minT', 'Min. tarde')}<th class="n">Promedio</th>${th('almL', 'Almuerzos largos')}${th('temp', 'Salidas antes')}${th('extra', 'Horas extra')}${th('aus', 'Sin marcar')}${th('just', 'Con permiso')}${th('sinConf', 'Comunicados sin confirmar')}${th('punt', 'Puntualidad')}</tr></thead><tbody>
         ${orden.map(x => `<tr class="clickable ${S.inf.sel === x.p.id ? 'hl' : ''}" data-selinf="${x.p.id}"><td><div class="person"><div class="avatar soft">${initials(x.p.nombre)}</div><div><b>${esc(x.p.nombre)}</b><small>${esc(area(x.p.area_id).nombre)} · ${esc(sede(x.p.sede_id).nombre)}</small></div></div></td>
-          <td class="n">${x.dias}</td><td class="n">${x.tardes}</td><td class="n">${x.minT}</td><td class="n">${x.tardes ? Math.round(x.minT / x.tardes) : 0}</td><td class="n">${x.almL}</td><td class="n">${x.temp}</td>
+          <td class="n">${x.sinHorario ? `<span class="chip warn" title="No tiene horario fijo asignado: no se puede medir la puntualidad. Asígnale horario en Malla.">Sin horario · marcó ${x.marcados} día${x.marcados === 1 ? '' : 's'}</span>` : x.dias}</td><td class="n">${x.tardes}</td><td class="n">${x.minT}</td><td class="n">${x.tardes ? Math.round(x.minT / x.tardes) : 0}</td><td class="n">${x.almL}</td><td class="n">${x.temp}</td>
           <td class="n">${horasTxt(x.extra)}</td><td class="n">${x.aus}</td><td class="n">${x.just}</td><td class="n">${x.sinConf ? `<span class="chip warn">${x.sinConf}</span>` : '0'}</td>
           <td class="n"><span class="chip ${x.dias ? pcCls(pc(x)) : 'mute'}">${x.dias ? pc(x) + ' %' : '—'}</span></td></tr>`).join('') || '<tr><td colspan="12" class="vacio">No hay personas en este grupo.</td></tr>'}
       </tbody></table></div></section>`;
 }
-// Descarga la asistencia del día elegido, con las mismas filas y estados que se ven en pantalla.
-function exportarAsistencia() {
+// Descarga de asistencia por rango de fechas: una fila por persona y por día, para TODAS las personas que
+// cuentan en asistencia (activas, o inactivas con datos en el rango), tengan o no horario fijo.
+function exportarAsistenciaView() {
+  const E = S.asisExp, hoyR = fechaEn(miTz()), mes = hoyR.slice(0, 8) + '01', mesAnt = sumarDias(mes, -1).slice(0, 8) + '01';
+  return `<form class="card compose" id="fExpAsis" novalidate style="margin-bottom:18px"><div class="sec-h" style="margin:0"><h2 style="font-size:20px">Exportar asistencia a Excel</h2><button type="button" class="link" data-accion="cerrarExpAsis">Cerrar</button></div>
+    <p class="hint" style="margin:0">Una fila por persona y por día, con turno, horas marcadas, estado y novedades. Incluye a todos los colaboradores, tengan o no horario asignado.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field"><label for="expDesde">Desde</label><input type="date" id="expDesde" value="${E.desde}" max="${hoyR}" required></div>
+      <div class="field"><label for="expHasta">Hasta</label><input type="date" id="expHasta" value="${E.hasta}" max="${hoyR}" required></div>
+      <button type="button" class="btn ghost sm" data-exprango="${mes}|${hoyR}">Este mes</button>
+      <button type="button" class="btn ghost sm" data-exprango="${mesAnt}|${sumarDias(mes, -1)}">Mes pasado</button>
+      <button class="btn teal" type="submit">${ico('file')} Descargar</button></div>
+    ${E.resultado ? `<div class="${E.resultado.ok ? 'ok-box' : 'err'}" role="status">${esc(E.resultado.msg)}</div>` : ''}</form>`;
+}
+async function exportarAsistencia(desde, hasta) {
+  if (desde > hasta) [desde, hasta] = [hasta, desde];
+  const dias = []; for (let f = desde; f <= hasta; f = sumarDias(f, 1)) dias.push(f);
+  if (dias.length > 370) throw new Error('El rango puede ser de máximo un año.');
+  const [malla, marcas, ausR] = await Promise.all([
+    mallaEfectiva(desde, hasta),
+    todas(() => sb.from('marcas').select('persona_id,fecha,tipo,hora').gte('fecha', desde).lte('fecha', hasta).order('fecha').order('persona_id').order('tipo')),
+    sb.rpc('ausencias_aprobadas', { p_desde: desde, p_hasta: hasta })
+  ]);
+  const A = { malla, marcas, ausencias: ausR.data || [] };
+  const tieneDatos = x => malla.some(r => r.persona_id === x.id) || marcas.some(r => r.persona_id === x.id);
+  const gente = S.personas.filter(x => lideraSede(x.sede_id) && marcaAsistencia(x, malla) && (x.activo || tieneDatos(x)))
+    .sort((a, b) => a.sede_id - b.sede_id || area(a.area_id).nombre.localeCompare(area(b.area_id).nombre) || a.nombre.localeCompare(b.nombre));
   const fmt = v => v == null ? '' : `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
-  const gente = S.personas.filter(x => x.activo && marcaAsistencia(x) && lideraSede(x.sede_id));
-  const filas = [['Fecha', 'Persona', 'Correo', 'Sede', 'Área', 'Turno', 'Horario', 'Entrada', 'Sale a almorzar', 'Regresa', 'Salida', 'Estado', 'Novedades']];
-  for (const x of gente) {
-    const { t, m, est } = estadoPersona(x), f = diaAsistencia(sede(x.sede_id).zona_horaria);
+  const NDIA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const filas = [['Fecha', 'Día', 'Persona', 'Correo', 'Sede', 'Área', 'Turno', 'Horario', 'Entrada', 'Sale a almorzar', 'Regresa', 'Salida', 'Estado', 'Novedades', 'Observación']];
+  const sinHorario = gente.filter(x => !malla.some(r => r.persona_id === x.id));
+  for (const x of gente) for (const f of dias) {
+    const { t, m, est } = estadoEn(x, f, A);
     const nov = PASOS.map(p => m[p.k] != null ? evaluar(p.k, m[p.k], t, m) : null).filter(ev => ev && (ev[0] === 'warn' || ev[0] === 'info')).map(ev => ev[1]).join(' · ');
-    filas.push([f, x.nombre, x.correo, sede(x.sede_id).nombre, area(x.area_id).nombre, t ? t.nombre : 'Sin turno', t && t.entrada ? `${hhmm(t.entrada)}–${hhmm(t.salida)}` : '',
-      ...PASOS.map(p => fmt(m[p.k])), est[1], nov]);
+    const obs = [!x.activo ? 'Cuenta desactivada' : '', sinHorario.includes(x) ? 'Sin horario fijo asignado' : ''].filter(Boolean).join(' · ');
+    filas.push([f, NDIA[new Date(f + 'T12:00:00Z').getUTCDay()], x.nombre, x.correo, sede(x.sede_id).nombre, area(x.area_id).nombre, t ? t.nombre : 'Sin turno',
+      t && t.entrada ? `${hhmm(t.entrada)}–${hhmm(t.salida)}` : '', ...PASOS.map(p => fmt(m[p.k])), est[1], nov, obs]);
   }
-  const csv = '\ufeff' + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+  // Verificación: cada persona debe tener exactamente una fila por día del rango, y toda marca del rango
+  // de alguien que no está en la lista se reporta (no debería pasar).
+  const esperadas = gente.length * dias.length, generadas = filas.length - 1;
+  const fuera = [...new Set(marcas.map(r => r.persona_id))].filter(id => !gente.some(x => x.id === id)).map(id => persona(id)).filter(Boolean)
+    .filter(x => lideraSede(x.sede_id));
+  if (generadas !== esperadas) throw new Error(`La verificación falló: se esperaban ${esperadas} filas y salieron ${generadas}. No se descargó el archivo.`);
+  const csv = '﻿' + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  a.download = `asistencia-dia-${S.asisDia || fechaEn(miTz())}.csv`; document.body.appendChild(a); a.click(); a.remove();
-  toast('Asistencia descargada. Ábrela con Excel.');
+  a.download = desde === hasta ? `asistencia-${desde}.csv` : `asistencia-${desde}-a-${hasta}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  return { personas: gente.length, dias: dias.length, filas: generadas, sinHorario, fuera };
 }
 function exportarInforme() {
   const I = calcularInforme(), pc = x => x.dias ? Math.round((1 - x.tardes / x.dias) * 100) : '';
-  const filas = [['Persona', 'Correo', 'Sede', 'Área', 'Jornadas', 'Llegadas tarde', 'Minutos tarde', 'Promedio tarde (min)', 'Almuerzos largos', 'Salidas antes', 'Horas extra (min)', 'Sin marcar', 'Con permiso', 'Comunicados sin confirmar', 'Puntualidad %'],
-    ...I.lista.map(x => [x.p.nombre, x.p.correo, sede(x.p.sede_id).nombre, area(x.p.area_id).nombre, x.dias, x.tardes, x.minT, x.tardes ? Math.round(x.minT / x.tardes) : 0, x.almL, x.temp, x.extra, x.aus, x.just, x.sinConf, pc(x)])];
+  const filas = [['Persona', 'Correo', 'Sede', 'Área', 'Jornadas', 'Llegadas tarde', 'Minutos tarde', 'Promedio tarde (min)', 'Almuerzos largos', 'Salidas antes', 'Horas extra (min)', 'Sin marcar', 'Con permiso', 'Comunicados sin confirmar', 'Puntualidad %', 'Observación'],
+    ...I.lista.map(x => [x.p.nombre, x.p.correo, sede(x.p.sede_id).nombre, area(x.p.area_id).nombre, x.dias, x.tardes, x.minT, x.tardes ? Math.round(x.minT / x.tardes) : 0, x.almL, x.temp, x.extra, x.aus, x.just, x.sinConf, pc(x),
+      x.sinHorario ? `Sin horario fijo asignado: marcó entrada ${x.marcados} día(s), no se mide puntualidad` : !x.p.activo ? 'Cuenta desactivada' : ''])];
   const csv = '﻿' + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = `asistencia-${periodo().clave}${S.inf.sede ? '-' + slug(sede(S.inf.sede).nombre) : ''}.csv`; document.body.appendChild(a); a.click(); a.remove();
@@ -1373,6 +1420,20 @@ function ocupado(el, si) { if (el) el.classList.toggle('spin', si); }
 document.addEventListener('submit', async e => {
   e.preventDefault();
   const f = e.target, btn = f.querySelector('button[type=submit]');
+  if (f.id === 'fExpAsis') {
+    const desde = f.querySelector('#expDesde').value, hasta = f.querySelector('#expHasta').value;
+    if (!desde || !hasta) { toast('Elige las dos fechas.'); return; }
+    S.asisExp = { desde, hasta }; ocupado(btn, true);
+    try {
+      const r = await exportarAsistencia(desde, hasta);
+      ocupado(btn, false);
+      let msg = `Descargado: ${r.personas} personas × ${r.dias} día${r.dias === 1 ? '' : 's'} = ${r.filas} filas, todas completas. Ábrelo con Excel.`;
+      if (r.sinHorario.length) msg += ` Sin horario fijo (salen como "Sin turno"): ${r.sinHorario.map(x => x.nombre).join(', ')}.`;
+      if (r.fuera.length) msg += ` Atención: hay marcas de ${r.fuera.map(x => x.nombre).join(', ')}, que no cuentan en asistencia.`;
+      S.asisExp.resultado = { ok: true, msg }; render();
+    } catch (err) { ocupado(btn, false); S.asisExp.resultado = { ok: false, msg: errorTexto(err) }; render(); }
+    return;
+  }
   if (f.id === 'fProyecto') {
     const nombre = f.querySelector('#pjNombre').value.trim(); if (!nombre) { toast('Escribe el nombre del proyecto.'); return; }
     ocupado(btn, true);
@@ -1468,7 +1529,8 @@ document.addEventListener('click', async e => {
     render(); return;
   }
   if (e.target.matches && e.target.matches('[data-cerrarmodal]')) { S.pj.abierta = null; S.pj.editProyecto = null; render(); return; }
-  const b = e.target.closest('button'); if (!b) { if (S.menu && !e.target.closest('.menu')) { S.menu = false; render(); } return; }
+  const b = e.target.closest('button'); if (b && b.dataset.exprango) { const [d, h] = b.dataset.exprango.split('|'); S.asisExp = { desde: d, hasta: h }; render(); return; }
+  if (!b) { if (S.menu && !e.target.closest('.menu')) { S.menu = false; render(); } return; }
   if (b.dataset.pjabrir) { Object.assign(S.pj, { actual: Number(b.dataset.pjabrir), filtro: '', filtroResp: '', nuevaCol: null }); await cargarProyectos(); render(); window.scrollTo(0, 0); return; }
   if (b.dataset.tarjeta) {
     S.pj.abierta = Number(b.dataset.tarjeta); S.pj.vistoAntes = S.pj.lecturas[S.pj.abierta] || null; render();
@@ -1507,7 +1569,8 @@ document.addEventListener('click', async e => {
   if (a === 'pjEditar') { S.pj.editProyecto = S.pj.actual; render(); return; }
   if (a === 'pjNuevaCancelar') { S.pj.nuevaCol = null; render(); return; }
   if (a === 'cerrarModal') { Object.assign(S.pj, { abierta: null, editProyecto: null, extEdit: null, extEditP: null }); render(); return; }
-  if (a === 'exportarAsistencia') { exportarAsistencia(); return; }
+  if (a === 'exportarAsistencia') { const d = S.asisDia || fechaEn(miTz()); S.asisExp = S.asisExp ? null : { desde: d, hasta: d }; render(); return; }
+  if (a === 'cerrarExpAsis') { S.asisExp = null; render(); return; }
   if (b.dataset.comf) {
     S.com.filtro = b.dataset.comf;
     if (S.view !== 'comunicados') { await ir('comunicados'); return; }

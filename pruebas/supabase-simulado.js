@@ -42,6 +42,11 @@
   [['Fotos de destinos', '00000000-0000-0000-0000-000000000110', null, 'en_curso', 30], ['Desarrollo del sitio', null, 'Agencia Pixel', 'pendiente', 0], ['Textos de paquetes', '00000000-0000-0000-0000-000000000110', null, 'pendiente', 0], ['Aprobar diseño', ADMIN, null, 'revision', 80]]
     .forEach(([titulo, rid, ext, columna, avance], i) => DB.tareas.push({ id: i + 1, proyecto_id: 1, titulo, descripcion: null, columna, orden: i, responsable_id: rid, responsable_externo: ext, fecha_inicio: null, fecha_limite: i === 0 ? '2026-12-15' : i === 2 ? '2026-11-01' : null, asignacion_vista: i === 0, prioridad: 'media', avance, creado_por: ADMIN, creado: new Date().toISOString(), actualizado: new Date().toISOString() }));
   DB.tarea_comentarios.push({ id: 1, tarea_id: 3, autor_id: ADMIN, texto: '¿Cómo vas con los textos? Necesitamos los de Cartagena primero.', creado: new Date(Date.now() - 36e5).toISOString() });
+  // Casos de prueba de asistencia: una colaboradora que marca pero no tiene horario fijo, y una gerente con horario.
+  DB.perfiles.push({ id: '00000000-0000-0000-0000-000000000901', nombre: 'Carla Sin Horario', correo: 'carla@x.co', sede_id: 1, area_id: 3, rol: 'colaborador', es_admin: false, activo: true, acepto_datos: '2026-01-01' });
+  DB.perfiles.push({ id: '00000000-0000-0000-0000-000000000902', nombre: 'Dora Gerente Con Horario', correo: 'dora@x.co', sede_id: 1, area_id: 1, rol: 'gerente', es_admin: false, activo: true, acepto_datos: '2026-01-01' });
+  for (let i = 1; i <= 10; i++) { const d = new Date(hoy); d.setUTCDate(d.getUTCDate() - i); if (d.getUTCDay() === 0) continue; DB.marcas.push({ persona_id: '00000000-0000-0000-0000-000000000901', fecha: iso(d), tipo: 'entrada', hora: `${iso(d)}T13:05:00Z` }); }
+  for (let dd = 1; dd <= 5; dd++) DB.horario_base.push({ persona_id: '00000000-0000-0000-0000-000000000902', dia: dd, turno_id: 1 });
   let sesion = null, meta = { debe_cambiar_contrasena: true };
   class Q {
     constructor(t) { this.t = t; this.f = []; this.op = 'select'; this.one = false; }
