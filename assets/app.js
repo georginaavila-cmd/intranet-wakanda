@@ -128,7 +128,8 @@ const PASOS = [
 
 /* ── Permisos (solo para mostrar u ocultar; la base de datos decide de verdad) ── */
 const P = () => S.perfil || {};
-const esGerencia = () => P().rol === 'gerente' || P().es_admin;
+// El rol Supervisor tiene los mismos permisos que la gerencia (además de administrar cuentas de colaboradores).
+const esGerencia = () => P().rol === 'gerente' || P().rol === 'supervisor' || P().es_admin;
 const ROLES = { colaborador: 'Colaborador', supervisor: 'Supervisor', directora: 'Directora', gerente: 'Gerente' };
 const gestionaCuentas = () => !!(P().es_admin || P().rol === 'supervisor');
 // Quien gestiona cuentas sin ser administración solo toca colaboradores comunes, y nunca su propia cuenta.
@@ -333,7 +334,7 @@ function guiaView() {
       <ul><li><b>Crear:</b> nombre, correo corporativo, sede, área y rol. La contraseña temporal se muestra <b>una sola vez</b>: cópiala y entrégala en privado. La persona la cambia al primer ingreso.</li>
       <li><b>Nueva contraseña:</b> para quien la olvidó.</li>
       <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li>
-      <li><b>Rol Supervisor:</b> asígnalo a quien deba crear y administrar cuentas de colaboradores (por ejemplo, contabilidad). No le da acceso a informes, aprobaciones ni configuración.</li></ul>` : ''}
+      <li><b>Rol Supervisor:</b> tiene los mismos permisos que la gerencia (ve y maneja todo) y, además, crea y administra las cuentas de colaboradores. Las cuentas de gerencia y administración solo las cambia la administración.</li></ul>` : ''}
       <p><b>Solicitudes.</b> En <b>Solicitudes</b> activas o apagas el módulo para todo el equipo y asignas los <b>revisores</b>: quién puede ver, aprobar y rechazar, por sede y por tipo (por ejemplo, contabilidad para incapacidades). Las directoras solo revisan si las asignas. Nadie aprueba sus propias solicitudes.</p>
       <p><b>Asistencia a Excel.</b> En <b>Asistencia</b>, el botón <b>Exportar a Excel</b> pide un rango de fechas (o <b>Este mes</b> / <b>Mes pasado</b>) y descarga una fila por persona y por día con turno, horas, estado y novedades. Incluye a todos los colaboradores, también a quien no tiene horario fijo (sale como "Sin turno"), y verifica que no falte ninguno. Las personas con rol gerente solo aparecen si tienen horario asignado.</p>
       <p><b>Informes.</b> Ves ambas sedes o una sola, con los indicadores del mes, la gráfica por día, el ranking de llegadas tarde y la confirmación de comunicados.</p>` },
@@ -348,7 +349,8 @@ function guiaView() {
       <p><b>Avisos:</b> quien recibe una tarjeta ve en Inicio el aviso de tarea nueva (con la etiqueta <b>Nueva</b> en la tarjeta hasta que la abre). Las tarjetas vencidas generan una alerta en rojo en Inicio y en la pestaña, tanto para la gerencia como para su responsable. Los responsables externos no tienen cuenta, así que no ven avisos.</p>
       <p>El avance del proyecto es el promedio del avance de sus tarjetas. Las tarjetas con la fecha límite vencida se marcan en rojo. Los proyectos terminados se pueden <b>archivar</b> desde <b>Editar proyecto</b>.</p>` },
     { id: 'g-cuentas', t: 'Para supervisores: cuentas y malla', si: P().rol === 'supervisor' && !P().es_admin, html: `
-      <p>Como supervisor manejas las cuentas de los colaboradores desde la pestaña <b>Equipo</b>.</p>
+      <p>Como supervisor tienes <b>los mismos permisos que la gerencia</b>: asistencia e informes de todas las sedes, solicitudes, comunicados, malla, turnos y proyectos (mira también la sección <b>Para la gerencia y administración</b>).</p>
+      <p>Además manejas las cuentas de los colaboradores desde la pestaña <b>Equipo</b>.</p>
       <ul><li><b>Crear:</b> nombre, correo corporativo, sede y área. La contraseña temporal se muestra <b>una sola vez</b>: cópiala y entrégala en privado. La persona la cambia al primer ingreso.</li>
       <li><b>Nueva contraseña:</b> para quien la olvidó.</li>
       <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li>
@@ -855,7 +857,7 @@ function solFormView() {
       <div><button class="btn teal" type="submit">${ico('check')} Enviar solicitud</button></div></form></section>`;
 }
 function revisoresView() {
-  const gerentes = S.personas.filter(x => x.rol === 'gerente' || x.es_admin);
+  const gerentes = S.personas.filter(x => x.rol === 'gerente' || x.rol === 'supervisor' || x.es_admin);
   const libres = S.personas.filter(x => x.activo && !gerentes.includes(x) && !S.sol.revisores.some(r => r.persona_id === x.id));
   const filas = S.sol.revisores.map(r => { const x = persona(r.persona_id); if (!x) return '';
     return `<tr><td><div class="person"><div class="avatar soft">${initials(x.nombre)}</div><div><b>${esc(x.nombre)}</b><small>${esc(area(x.area_id).nombre)} · ${esc(sede(x.sede_id).nombre)}</small></div></div></td>
