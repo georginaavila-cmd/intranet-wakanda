@@ -61,6 +61,8 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 /* ── Íconos (Lucide, trazo 2px) ── */
 const IC = {
+  monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  wifi: '<path d="M12 20h.01M2 8.82a15 15 0 0 1 20 0M5 12.86a10 10 0 0 1 14 0M8.5 16.43a5 5 0 0 1 7 0"/>',
   in: '<path d="m10 17 5-5-5-5"/><path d="M15 12H3"/><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>',
   out: '<path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>',
   lunch: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>',
@@ -284,14 +286,14 @@ function appView() {
   if (gestionaCuentas()) tabs.push(['equipo', 'Equipo']);
   if (esGerencia()) tabs.push(['proyectos', 'Proyectos']); else if (S.pj.tengo) tabs.push(['proyectos', 'Mis tareas']);
   const pendSol = moduloSol() ? porRevisar().filter(x => puedeAprobar(x)).length : 0;
-  const vistas = { proyectos: proyectosView, informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, guia: guiaView, clave: () => claveView(false) };
+  const vistas = { oficina: oficinaView, proyectos: proyectosView, informes: informesView, inicio: inicioView, malla: mallaView, comunicados: comunicadosView, solicitudes: solicitudesView, asistencia: asistenciaView, equipo: equipoView, guia: guiaView, clave: () => claveView(false) };
   const rol = ROLES[p.rol] + (p.es_admin ? ' · administración' : '');
   return `<header class="top"><div class="wrap">
       <div class="brand"><img src="assets/logo-wakanda.png" alt=""><span>Wakanda Travel</span></div>
       <nav class="tabs" aria-label="Secciones">${tabs.map(([k, l]) => `<button type="button" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ''}>${l}${k === 'comunicados' && pendCom ? `<span class="badge" aria-label="${pendCom} sin confirmar">${pendCom}</span>` : ''}${k === 'proyectos' && S.pj.vencidas ? `<span class="badge roja" aria-label="${S.pj.vencidas} vencidas">${S.pj.vencidas}</span>` : k === 'proyectos' && ((esGerencia() ? 0 : S.pj.nuevas) + comentariosNuevos()) ? `<span class="badge" aria-label="avisos nuevos">${(esGerencia() ? 0 : S.pj.nuevas) + comentariosNuevos()}</span>` : ''}${k === 'solicitudes' && pendSol ? `<span class="badge" aria-label="${pendSol} por revisar">${pendSol}</span>` : ''}</button>`).join('')}</nav>
       <div class="menu"><button type="button" data-accion="menu" aria-expanded="${S.menu}" aria-label="Menú de ${esc(p.nombre)}"><span class="avatar">${initials(p.nombre)}</span></button>
         ${S.menu ? `<div class="menu-pop"><div class="who"><b>${esc(p.nombre)}</b>${esc(rol)} · ${esc(sede(p.sede_id).nombre)}</div>
-          <button type="button" data-view="guia">Guía de uso</button><button type="button" data-view="clave">Cambiar contraseña</button><button type="button" data-accion="salir">Cerrar sesión</button></div>` : ''}</div>
+          <button type="button" data-view="guia">Guía de uso</button>${esGerencia() ? '<button type="button" data-view="oficina">Seguridad de la marcación</button>' : ''}<button type="button" data-view="clave">Cambiar contraseña</button><button type="button" data-accion="salir">Cerrar sesión</button></div>` : ''}</div>
     </div></header>
     <main class="wrap">${(vistas[S.view] || inicioView)()}</main>
     <footer class="foot-site"><div class="wrap"><span><b>Wakanda Travel</b> — Diseñadores de viajes, diseñadores de sueños</span><span>Intranet · RNT 101438</span></div></footer>
@@ -336,6 +338,7 @@ function guiaView() {
       <li><b>Desactivar:</b> cuando alguien sale de la empresa. Su historial se conserva y se puede reactivar.</li>
       <li><b>Rol Supervisor:</b> tiene los mismos permisos que la gerencia (ve y maneja todo) y, además, crea y administra las cuentas de colaboradores. Las cuentas de gerencia y administración solo las cambia la administración.</li></ul>` : ''}
       <p><b>Solicitudes.</b> En <b>Solicitudes</b> activas o apagas el módulo para todo el equipo y asignas los <b>revisores</b>: quién puede ver, aprobar y rechazar, por sede y por tipo (por ejemplo, contabilidad para incapacidades). Las directoras solo revisan si las asignas. Nadie aprueba sus propias solicitudes.</p>
+      <p><b>Seguridad de la marcación.</b> En el menú de tu nombre, <b>Seguridad de la marcación</b>: registra la IP de la oficina (control 1, evita marcar desde la casa o con datos del celular) y autoriza cada computador de la oficina (control 2, evita marcar con el celular aunque esté en el Wi-Fi). Activa los controles cuando todo esté registrado. Si cambia la IP de la oficina, allí mismo verás el aviso y podrás registrar la nueva con un clic.</p>
       <p><b>Asistencia a Excel.</b> En <b>Asistencia</b>, el botón <b>Exportar a Excel</b> pide un rango de fechas (o <b>Este mes</b> / <b>Mes pasado</b>) y descarga una fila por persona y por día con turno, horas, estado y novedades. Incluye a todos los colaboradores, también a quien no tiene horario fijo (sale como "Sin turno"), y verifica que no falte ninguno. Las personas con rol gerente solo aparecen si tienen horario asignado.</p>
       <p><b>Informes.</b> Ves ambas sedes o una sola, con los indicadores del mes, la gráfica por día, el ranking de llegadas tarde y la confirmación de comunicados.</p>` },
     { id: 'g-proyectos', t: 'Proyectos (tablero de gerencia)', si: esGerencia(), html: `
@@ -366,7 +369,7 @@ function guiaView() {
       <li>Cuando te asignan una tarea, en <b>Inicio</b> verás el aviso <b>"Tienes una tarea nueva asignada"</b> y la tarjeta tendrá la etiqueta <b>Nueva</b> hasta que la abras. Si una tarea se vence sin estar en Hecho, el aviso aparece en <b>rojo</b>.</li></ul>` },
     { id: 'g-faq', t: 'Preguntas frecuentes', html: `
       <p><b>Olvidé mi contraseña.</b> Pídele a la gerencia que la restablezca; recibirás una temporal.</p>
-      <p><b>¿Puedo marcar desde el celular?</b> ${S.config.validar_ip && S.config.validar_ip.activo ? 'No. Solo se puede marcar desde la oficina.' : 'Pronto solo se podrá marcar desde la oficina y tu computador asignado. Acostúmbrate a marcar desde tu puesto.'}</p>
+      <p><b>¿Puedo marcar desde el celular?</b> ${controlActivo('validar_equipo') ? 'No. Solo se puede marcar desde los computadores autorizados de la oficina.' : controlActivo('validar_ip') ? 'No con datos móviles: solo conectado a la red de la oficina.' : 'Pronto solo se podrá marcar desde la oficina y tu computador asignado. Acostúmbrate a marcar desde tu puesto.'}</p>
       <p><b>Mi turno no es el que aparece.</b> Habla con tu directora para que corrija la malla.</p>
       ${moduloSol() || esGerencia() ? '' : '<p><b>No veo Solicitudes.</b> El módulo está apagado; la gerencia decide cuándo activarlo.</p>'}
       <p><b>¿A quién acudo?</b> Turnos, malla y marcas: tu directora de operaciones. Cuentas y contraseñas: la gerencia. Solicitudes: quien las revisa o la gerencia.</p>` }
@@ -386,6 +389,8 @@ async function cargarInicio() {
   ]);
   const semana = efectiva.filter(r => r.persona_id === P().id);
   S.hoy = { fecha: hoy, malla: semana.find(r => r.fecha === hoy) || null, marcas, semana, lunes };
+  S.conexion = null;
+  if (controlActivo('validar_ip') || controlActivo('validar_equipo')) { try { S.conexion = await q(sb.rpc('mi_conexion', { p_llave: llaveEquipo() })); } catch (_) {} }
   await Promise.all([cargarComunicados(), cargarSolicitudes()]);
 }
 function evaluar(paso, realMin, t, marcas) {
@@ -447,10 +452,11 @@ function paseView() {
   const accion = sig ? `<button class="mark-btn" type="button" data-marcar="${sig.k}">${ico(sig.ico)} ${sig.btn}</button>`
     : `<span class="chip ok" style="font-size:14px;padding:6px 14px">${ico('check')} Jornada completa</span>`;
   const sinMalla = !t ? `<div class="notice" style="margin:0">${ico('alert')}<div>Tu turno de hoy todavía no está en la malla. Puedes marcar igual; tu líder lo verá en la asistencia.</div></div>` : '';
-  const ipOn = S.config.validar_ip && S.config.validar_ip.activo;
+  const ipOn = controlActivo('validar_ip') || controlActivo('validar_equipo'), bloq = motivoLocal();
   return `<section class="card pass" aria-label="Pase de jornada">${stub}<div class="pass-body">${sinMalla}
       <div class="legs">${legs}</div>
-      <div class="action">${accion}<div class="where">${ico('shield')} ${ipOn ? `Solo desde la oficina ${esc(sede(p.sede_id).nombre)}` : 'La hora la pone el servidor'}</div></div></div></section>`;
+      ${bloq && sig ? `<div class="notice" style="margin:0;border-color:#f2b8b5;background:#fdecea">${ico('alert')}<div><b>Desde este dispositivo no se puede marcar.</b> ${esc(bloq)}</div></div>` : ''}
+      <div class="action">${accion}<div class="where">${ico('shield')} ${ipOn ? `Solo desde ${controlActivo('validar_equipo') ? 'computadores autorizados de ' : ''}la oficina ${esc(sede(p.sede_id).nombre)}` : 'La hora la pone el servidor'}</div></div></div></section>`;
 }
 function herramientasView() {
   if (!S.herramientas.length) return '<div class="card vacio">Todavía no hay herramientas publicadas.</div>';
@@ -1401,6 +1407,94 @@ async function pjMover(id, columna, antesDe) {
   try { await pjGuardar('tareas', id, campos); } catch (err) { toast(errorTexto(err)); await cargarProyectos(); render(); }
 }
 
+/* ── Seguridad de la marcación (gerencia) ── */
+const controlActivo = k => !!(S.config[k] && S.config[k].activo);
+// Llave secreta de este computador (la crea la gerencia al autorizarlo). Si el navegador borra sus datos, se pierde.
+const LLAVE = 'wakanda-equipo';
+function llaveEquipo() { try { return localStorage.getItem(LLAVE) || null; } catch (_) { return null; } }
+// Lo que el servidor dirá si se intenta marcar desde aquí (para avisar antes; la decisión final es del servidor).
+function motivoLocal() {
+  const c = S.conexion; if (!c) return null;
+  if (c.validar_ip && !c.red_oficina) return 'Solo puedes marcar conectado a la red (Wi-Fi o cable) de la oficina.';
+  if (c.validar_equipo && !c.equipo) return 'Solo se puede marcar desde un computador autorizado de la oficina, no desde el celular ni desde otro equipo.';
+  return null;
+}
+async function cargarOficina() {
+  const [con, sedes, ips, equipos, bloqueos, conf] = await Promise.all([
+    q(sb.rpc('mi_conexion', { p_llave: llaveEquipo() })),
+    q(sb.from('sedes').select('id,nombre,ips_oficina').order('id')),
+    q(sb.rpc('ips_recientes', { p_dias: 30 })),
+    q(sb.from('equipos_autorizados').select('*').order('nombre')),
+    q(sb.from('marcas_bloqueadas').select('*').order('cuando', { ascending: false }).limit(40)),
+    q(sb.from('configuracion').select('clave,valor'))
+  ]);
+  S.config = Object.fromEntries(conf.map(c => [c.clave, c.valor]));
+  S.ofi = { ...(S.ofi || {}), con, sedes, ips, equipos, bloqueos };
+  if (!S.ofi.sede) S.ofi.sede = P().sede_id;
+}
+const ipsDe = sid => ((S.ofi.sedes.find(x => x.id === sid) || {}).ips_oficina || []).map(String);
+// ¿La IP cae dentro de lo registrado? (IPv4 exacta; IPv6 por los primeros 4 bloques, la red /64 de la oficina)
+const ipRegistrada = (ip, sid) => ipsDe(sid).some(r => r === ip || r === ip + '/32' || (r.includes(':') && r.endsWith('/64') && ip.includes(':') && prefijo64(ip) === prefijo64(r.split('/')[0])));
+function prefijo64(ip) { const [a, b = ''] = ip.split('::'), A = a ? a.split(':') : [], B = b ? b.split(':') : [], full = [...A, ...Array(8 - A.length - B.length).fill('0'), ...B]; return full.slice(0, 4).map(x => parseInt(x || '0', 16)).join(':'); }
+function oficinaView() {
+  const O = S.ofi; if (!O) return '<div class="cargando">Cargando…</div>';
+  const ipOn = controlActivo('validar_ip'), eqOn = controlActivo('validar_equipo'), miIp = O.con.ip, sedeSel = O.sede;
+  const varias = O.sedes.length > 1, miLlave = llaveEquipo();
+  const sw = (k, on) => `<label class="switch"><input type="checkbox" data-oficontrol="${k}" ${on ? 'checked' : ''}><span class="tr"></span> ${on ? 'Activado' : 'Apagado'}</label>`;
+  const sedeOpts = sel => O.sedes.map(x => `<option value="${x.id}" ${x.id === sel ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('');
+  const listaIps = O.sedes.map(x => { const l = ipsDe(x.id); return `<div class="ofi-sede">${varias ? `<b>Sede ${esc(x.nombre)}</b>` : ''}
+      ${l.length ? l.map(ip => `<div class="ofi-fila"><code>${esc(ip)}</code>${miIp && ip === miIp ? ' <span class="chip ok">tu conexión actual</span>' : ''}<span style="flex:1"></span><button type="button" class="link" data-ofiquitar="${x.id}|${esc(ip)}">Quitar</button></div>`).join('')
+        : `<div class="ofi-fila vacia">Sin IP registrada${ipOn ? ': <b style="color:var(--bad)">nadie de esta sede puede marcar</b>' : ''}</div>`}</div>`; }).join('');
+  const recientes = O.ips.filter(r => !O.sedes.some(x => ipRegistrada(r.ip, x.id)));
+  const bloqRecientes = O.bloqueos.filter(b => Date.now() - Date.parse(b.cuando) < 7 * 864e5);
+  // Si varias personas fueron bloqueadas por red desde una misma IP nueva, probablemente cambió la IP de la oficina.
+  const porIp = {}; for (const b of bloqRecientes) if (b.motivo.includes('red') && b.ip) (porIp[b.ip] = porIp[b.ip] || new Set()).add(b.persona_id);
+  const sospechosa = Object.entries(porIp).filter(([, set]) => set.size >= 3).map(([ip]) => ip)[0];
+  return `<div class="hello"><div><div class="eyebrow">Seguridad de la marcación</div><h1>Oficina</h1>
+      <p>Decide desde dónde se puede marcar la jornada. Lo más seguro es activar los dos controles: el 1 evita que marquen desde la casa o con datos del celular, y el 2 evita que marquen con el celular aunque esté conectado al Wi-Fi de la oficina.</p></div></div>
+    ${sospechosa ? `<div class="alerta roja" role="alert"><span class="sq">${ico('wifi')}</span><div><b>¿Cambió la IP de la oficina?</b><span>${porIp[sospechosa].size} personas intentaron marcar desde <b>${esc(sospechosa)}</b> y fueron bloqueadas. Si esa es la nueva IP de la oficina, regístrala.</span></div>
+      <button type="button" class="btn sm danger" data-ofiregip="${esc(sospechosa)}|${sedeSel}">Registrar ${esc(sospechosa)}</button></div>` : ''}
+
+    <section class="card ofi-control"><div class="ofi-cab"><div><div class="eyebrow" style="color:var(--ink-3)">Control 1</div><h2>Solo desde la red de la oficina</h2>
+        <p class="hint">${ipOn ? 'Activado: solo se puede marcar desde la IP registrada de la oficina.' : 'Apagado: se puede marcar desde cualquier internet.'}</p></div>${sw('validar_ip', ipOn)}</div>
+      <div class="ofi-ahora"><span class="hint">Tu conexión ahora</span><code class="grande">${esc(miIp || 'desconocida')}</code>
+        ${miIp && !ipRegistrada(miIp, sedeSel) ? `${varias ? `<select id="ofiSede" aria-label="Sede">${sedeOpts(sedeSel)}</select>` : ''}<button type="button" class="btn sm teal" data-ofiregistrar="1">${ico('plus')} Registrar como IP de la oficina</button>`
+          : miIp ? `<span class="chip ok">${ico('check')} Es la IP registrada de la oficina</span>` : ''}</div>
+      <p class="hint">Haz esto desde un computador conectado al internet de la oficina. La IP es la dirección pública del internet de la oficina: todos los equipos conectados allí salen con la misma.</p>
+      <h3 class="ofi-h">IP registradas</h3>${listaIps}
+      <form id="fOfiIp" class="fila-form" novalidate style="margin-top:8px">${varias ? `<select name="sede" aria-label="Sede">${sedeOpts(sedeSel)}</select>` : ''}<input name="ip" placeholder="Agregar otra IP a mano (ej.: 152.202.102.248)" aria-label="IP"><button class="btn ghost sm" type="submit">Agregar</button></form>
+      ${recientes.length ? `<h3 class="ofi-h">Otras IP desde las que se marcó (últimos 30 días)</h3>
+        <div class="tablewrap"><table><thead><tr><th>IP</th><th class="n">Marcas</th><th class="n">Personas</th><th>Última</th><th></th></tr></thead><tbody>
+        ${recientes.slice(0, 12).map(r => `<tr><td><code>${esc(r.ip)}</code>${r.personas >= 3 ? ' <span class="chip info">probablemente la oficina</span>' : ' <span class="chip mute">casa o celular</span>'}</td><td class="n">${r.marcas}</td><td class="n">${r.personas}</td><td>${esc(fechaCortaPj(r.ultima))}</td>
+          <td><button type="button" class="link" data-ofiregip="${esc(r.ip)}|${r.sede_id || sedeSel}">Registrar como oficina</button></td></tr>`).join('')}</tbody></table></div>` : ''}
+      <div class="notice">${ico('alert')}<div>Si el proveedor de internet cambia la IP de la oficina, nadie podrá marcar hasta que registres la nueva aquí (la intranet te avisará arriba si ve varios intentos bloqueados desde una IP nueva). En los últimos días la IP de la oficina ya cambió una vez: pide al proveedor una <b>IP fija</b>. Ojo: un celular conectado al Wi-Fi de la oficina sale con la misma IP; para evitarlo, activa también el control 2.</div></div>
+    </section>
+
+    <section class="card ofi-control"><div class="ofi-cab"><div><div class="eyebrow" style="color:var(--ink-3)">Control 2</div><h2>Solo desde computadores autorizados</h2>
+        <p class="hint">${eqOn ? 'Activado: solo se puede marcar desde los computadores de la lista.' : 'Apagado: se puede marcar desde cualquier equipo.'}</p></div>${sw('validar_equipo', eqOn)}</div>
+      <div class="ofi-ahora">${O.con.equipo ? `<span class="chip ok">${ico('check')} Este computador está autorizado como «${esc(O.con.equipo)}»</span>`
+        : `<input id="ofiNombre" placeholder="Nombre de este computador (ej.: Recepción, Ventas 1)" maxlength="60" style="flex:1;min-width:220px"><button type="button" class="btn sm teal" data-accion="ofiAutorizar">${ico('monitor')} Autorizar este computador</button>`}</div>
+      <p class="hint">Entra a la intranet con tu cuenta <b>en cada computador de la oficina</b> y toca «Autorizar este computador». El navegador guarda una llave secreta; si se borran sus datos, se usa otro navegador o una ventana de incógnito, hay que autorizarlo otra vez. <b>No autorices celulares.</b></p>
+      <div class="tablewrap"><table><thead><tr><th>Computador</th><th>Autorizado</th><th>Última marca</th><th></th></tr></thead><tbody>
+        ${O.equipos.map(e => `<tr><td><input class="tname" data-equiponombre="${e.id}" value="${esc(e.nombre)}" aria-label="Nombre del computador">${miLlave && O.con.equipo === e.nombre ? ' <span class="chip ok">Este</span>' : ''}</td>
+          <td class="hint">${esc(cuando(e.creado))}${persona(e.creado_por) ? ' · ' + esc(persona(e.creado_por).nombre) : ''}</td><td>${e.ultima_marca ? esc(cuando(e.ultima_marca)) : '<span class="hint">Nunca</span>'}</td>
+          <td><button type="button" class="link" style="color:var(--bad)" data-equipoquitar="${e.id}">Quitar</button></td></tr>`).join('') || '<tr><td colspan="4" class="vacio">Aún no hay computadores autorizados.</td></tr>'}
+      </tbody></table></div></section>
+
+    <section class="card ofi-control"><h2 style="margin-bottom:8px">Intentos bloqueados</h2>
+      ${O.bloqueos.length ? `<div class="tablewrap"><table><thead><tr><th>Cuándo</th><th>Persona</th><th>Marca</th><th>IP</th><th>Motivo</th></tr></thead><tbody>
+        ${O.bloqueos.map(b => `<tr><td>${esc(cuando(b.cuando))}</td><td>${esc((persona(b.persona_id) || { nombre: '—' }).nombre)}</td><td>${b.tipo ? esc(PASOS.find(p => p.k === b.tipo).lbl) : ''}</td><td><code>${esc(b.ip || '')}</code></td><td class="hint">${esc(b.motivo)}</td></tr>`).join('')}</tbody></table></div>`
+        : '<p class="hint">Nadie ha intentado marcar desde un lugar no permitido.</p>'}</section>
+
+    <section class="card ofi-control"><div class="eyebrow" style="color:var(--ink-3)">Fuera de la intranet</div><h2>Programas de acceso remoto</h2>
+      <p>Con AnyDesk, TeamViewer, Chrome Remote Desktop o Escritorio remoto de Windows, alguien desde su casa puede manejar un computador de la oficina. Para la intranet eso se ve igual que estar sentado allí: ninguna página web puede detectarlo con certeza. Se evita con medidas en los computadores:</p>
+      <ul><li>Desinstalar esos programas y quitar a los asesores el permiso de administrador para instalar otros.</li>
+      <li>Apagar el Escritorio remoto de Windows (Configuración → Sistema → Escritorio remoto).</li>
+      <li>Bloquear en el router de la oficina los sitios de esos programas (anydesk.com, teamviewer.com, remotedesktop.google.com).</li>
+      <li>Revisar cada mes la columna «Última marca» y las marcas a horas raras.</li></ul></section>`;
+}
+async function ofiRecargar(msg) { await cargarOficina(); render(); if (msg) toast(msg); }
+
 /* ── Navegación ── */
 async function ir(view) {
   S.view = view; S.menu = false; S.error = '';
@@ -1412,6 +1506,7 @@ async function ir(view) {
     if (view === 'asistencia') await cargarAsistencia();
     if (view === 'informes') await cargarInforme();
     if (view === 'equipo') await recargarPersonas();
+    if (view === 'oficina') await cargarOficina();
     if (view === 'proyectos') { S.pj.abierta = null; S.pj.editProyecto = null; await cargarProyectos(); }
   } catch (e) { toast(errorTexto(e)); }
   render(); window.scrollTo(0, 0);
@@ -1422,6 +1517,12 @@ function ocupado(el, si) { if (el) el.classList.toggle('spin', si); }
 document.addEventListener('submit', async e => {
   e.preventDefault();
   const f = e.target, btn = f.querySelector('button[type=submit]');
+  if (f.id === 'fOfiIp') {
+    const ip = f.ip.value.trim(), sid = Number(f.sede ? f.sede.value : S.ofi.sede); if (!ip) return;
+    ocupado(btn, true);
+    try { await q(sb.rpc('oficina_registrar_ip', { p_sede: sid, p_ip: ip })); await ofiRecargar('IP registrada.'); } catch (err) { ocupado(btn, false); toast(errorTexto(err)); }
+    return;
+  }
   if (f.id === 'fExpAsis') {
     const desde = f.querySelector('#expDesde').value, hasta = f.querySelector('#expHasta').value;
     if (!desde || !hasta) { toast('Elige las dos fechas.'); return; }
@@ -1534,6 +1635,29 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('button'); if (b && b.dataset.exprango) { const [d, h] = b.dataset.exprango.split('|'); S.asisExp = { desde: d, hasta: h }; render(); return; }
   if (!b) { if (S.menu && !e.target.closest('.menu')) { S.menu = false; render(); } return; }
   if (b.dataset.pjabrir) { Object.assign(S.pj, { actual: Number(b.dataset.pjabrir), filtro: '', filtroResp: '', nuevaCol: null }); await cargarProyectos(); render(); window.scrollTo(0, 0); return; }
+  if (b.dataset.ofiregistrar) {
+    const sid = Number((document.getElementById('ofiSede') || {}).value || S.ofi.sede); ocupado(b, true);
+    try { await q(sb.rpc('oficina_registrar_ip', { p_sede: sid, p_ip: null })); await ofiRecargar('IP de la oficina registrada.'); } catch (err) { ocupado(b, false); toast(errorTexto(err)); }
+    return;
+  }
+  if (b.dataset.ofiregip) {
+    const [ip, sid] = b.dataset.ofiregip.split('|');
+    if (!confirm(`¿Registrar ${ip} como IP de la oficina ${sede(Number(sid)).nombre}? Desde esa IP se podrá marcar.`)) return;
+    try { await q(sb.rpc('oficina_registrar_ip', { p_sede: Number(sid), p_ip: ip })); await ofiRecargar('IP registrada.'); } catch (err) { toast(errorTexto(err)); }
+    return;
+  }
+  if (b.dataset.ofiquitar) {
+    const [sid, ip] = b.dataset.ofiquitar.split('|');
+    if (controlActivo('validar_ip') && ipsDe(Number(sid)).length === 1 && !confirm('Es la única IP de esta sede y el control 1 está activado: nadie de la sede podrá marcar. ¿Quitarla igual?')) return;
+    try { await q(sb.rpc('oficina_quitar_ip', { p_sede: Number(sid), p_ip: ip })); await ofiRecargar('IP quitada.'); } catch (err) { toast(errorTexto(err)); }
+    return;
+  }
+  if (b.dataset.equipoquitar) {
+    const e = S.ofi.equipos.find(x => x.id === Number(b.dataset.equipoquitar));
+    if (!confirm(`¿Quitar la autorización de «${e.nombre}»? Desde ese computador ya no se podrá marcar.`)) return;
+    try { await q(sb.from('equipos_autorizados').delete().eq('id', e.id)); await ofiRecargar('Computador quitado.'); } catch (err) { toast(errorTexto(err)); }
+    return;
+  }
   if (b.dataset.tarjeta) {
     S.pj.abierta = Number(b.dataset.tarjeta); S.pj.vistoAntes = S.pj.lecturas[S.pj.abierta] || null; render();
     marcarLeida(S.pj.abierta);
@@ -1573,6 +1697,17 @@ document.addEventListener('click', async e => {
   if (a === 'cerrarModal') { Object.assign(S.pj, { abierta: null, editProyecto: null, extEdit: null, extEditP: null }); render(); return; }
   if (a === 'exportarAsistencia') { const d = S.asisDia || fechaEn(miTz()); S.asisExp = S.asisExp ? null : { desde: d, hasta: d }; render(); return; }
   if (a === 'cerrarExpAsis') { S.asisExp = null; render(); return; }
+  if (a === 'ofiAutorizar') {
+    const nombre = (document.getElementById('ofiNombre') || {}).value?.trim();
+    if (!nombre) { toast('Escribe un nombre para este computador, por ejemplo "Recepción".'); return; }
+    if (/android|iphone|ipad|mobile/i.test(navigator.userAgent) && !confirm('Parece que estás en un celular o tableta. Solo se deben autorizar computadores de la oficina. ¿Autorizar igual?')) return;
+    let llave = llaveEquipo();
+    if (!llave) { const r = new Uint8Array(32); crypto.getRandomValues(r); llave = Array.from(r, n => n.toString(16).padStart(2, '0')).join(''); }
+    ocupado(b, true);
+    try { await q(sb.rpc('autorizar_equipo', { p_nombre: nombre, p_llave: llave })); localStorage.setItem(LLAVE, llave); await ofiRecargar(`«${nombre}» quedó autorizado para marcar.`); }
+    catch (err) { ocupado(b, false); toast(errorTexto(err)); }
+    return;
+  }
   if (b.dataset.comf) {
     S.com.filtro = b.dataset.comf;
     if (S.view !== 'comunicados') { await ir('comunicados'); return; }
@@ -1637,8 +1772,12 @@ document.addEventListener('click', async e => {
   }
   if (b.dataset.marcar) {
     ocupado(b, true);
-    const { error } = await sb.rpc('marcar', { p_tipo: b.dataset.marcar });
-    if (error) { ocupado(b, false); toast(errorTexto(error)); return; }
+    const { error } = await sb.rpc('marcar', { p_tipo: b.dataset.marcar, p_llave: llaveEquipo() });
+    if (error) {
+      ocupado(b, false); toast(errorTexto(error));
+      if (/oficina|autorizado/.test(error.message || '')) { try { await sb.rpc('registrar_bloqueo', { p_tipo: b.dataset.marcar, p_llave: llaveEquipo() }); } catch (_) {} }
+      return;
+    }
     await cargarInicio(); render(); toast(`${PASOS.find(p => p.k === b.dataset.marcar).lbl} registrada a las ${horaEn(miTz())}.`); return;
   }
   if (b.dataset.semana) { S.malla.lunes = b.dataset.semana === '0' ? lunesDe(fechaEn(miTz())) : sumarDias(S.malla.lunes, Number(b.dataset.semana)); S.malla.edit = null; await cargarMalla(); render(); return; }
@@ -1710,6 +1849,27 @@ document.addEventListener('focusout', e => {
 document.addEventListener('change', async e => {
   const el = e.target;
   try {
+    if (el.dataset.oficontrol) {
+      const k = el.dataset.oficontrol, on = el.checked;
+      if (on && k === 'validar_ip') {
+        const sin = S.ofi.sedes.filter(x => !ipsDe(x.id).length && S.personas.some(p => p.activo && p.sede_id === x.id && p.rol !== 'gerente'));
+        if (!S.ofi.sedes.some(x => ipsDe(x.id).length)) { el.checked = false; toast('Primero registra la IP de la oficina.'); return; }
+        if (sin.length && !confirm(`${sin.map(x => 'La sede ' + x.nombre).join(' y ')} no tiene IP registrada: nadie de allí podrá marcar. ¿Activar igual?`)) { el.checked = false; return; }
+      }
+      if (on && k === 'validar_equipo') {
+        if (!S.ofi.equipos.length) { el.checked = false; toast('Primero autoriza al menos un computador de la oficina.'); return; }
+        if (!confirm(`Desde ahora solo se podrá marcar desde los ${S.ofi.equipos.length} computador(es) autorizado(s). ¿Activar?`)) { el.checked = false; return; }
+      }
+      try { await q(sb.from('configuracion').update({ valor: { ...(S.config[k] || {}), activo: on } }).eq('clave', k)); await ofiRecargar(on ? 'Control activado.' : 'Control apagado.'); }
+      catch (err) { el.checked = !on; toast(errorTexto(err)); }
+      return;
+    }
+    if (el.dataset.equiponombre) {
+      const v = el.value.trim(); if (!v) { render(); return; }
+      try { await q(sb.from('equipos_autorizados').update({ nombre: v }).eq('id', Number(el.dataset.equiponombre))); await ofiRecargar('Nombre guardado.'); } catch (err) { toast(errorTexto(err)); }
+      return;
+    }
+    if (el.id === 'ofiSede') { S.ofi.sede = Number(el.value); return; }
     if (el.dataset.tcampo) {
       const t = S.pj.tareas.find(x => x.id === S.pj.abierta), campo = el.dataset.tcampo; let v = el.value;
       if (campo === 'titulo' && !v.trim()) { render(); return; }

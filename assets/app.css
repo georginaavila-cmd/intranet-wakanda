@@ -174,3 +174,18 @@ table.malla select.shift { min-width: 92px; max-width: 220px; text-align-last: l
 .kcom-nuevo { display: inline-flex; align-items: center; gap: 3px; background: #2f6fb5; color: #fff; border-radius: 99px; padding: 1px 8px 1px 6px; font-weight: 600; }
 .kcom-nuevo .ico { width: 13px; height: 13px; }
 .seg-item.nuevo > div { background: #eaf2fb; box-shadow: inset 3px 0 0 #2f6fb5; }
+/* ── Seguridad de la marcación (Oficina) ── */
+.ofi-control { padding: 22px 24px; margin-bottom: 18px; display: grid; gap: 12px; }
+.ofi-control h2 { font-size: 21px; margin: 2px 0; }
+.ofi-control ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--ink-2); font-size: 14.5px; }
+.ofi-control p { margin: 0; }
+.ofi-cab { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.ofi-ahora { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: #f4f7fb; border-radius: 12px; padding: 14px 16px; }
+.ofi-ahora code.grande { font-size: 18px; font-weight: 700; color: var(--navy); }
+.ofi-h { font-size: 16px; color: var(--navy); margin: 6px 0 0; }
+.ofi-sede { display: grid; gap: 6px; }
+.ofi-sede > b { font-size: 13px; color: var(--ink-3); margin-top: 4px; }
+.ofi-fila { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: #fff; }
+.ofi-fila code { font-size: 15px; }
+.ofi-fila.vacia { color: var(--ink-3); font-size: 14px; }
+.ofi-control input.tname { max-width: 240px; }

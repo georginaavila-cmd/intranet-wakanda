@@ -4,14 +4,14 @@
   const hoyTz = tz => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
   const ADMIN = '00000000-0000-0000-0000-00000000000a';
   const DB = {
-    sedes: [{ id: 1, nombre: 'Colombia', zona_horaria: 'America/Bogota' }, { id: 2, nombre: 'República Dominicana', zona_horaria: 'America/Santo_Domingo' }],
+    sedes: [{ id: 1, nombre: 'Colombia', zona_horaria: 'America/Bogota', ips_oficina: [] }, { id: 2, nombre: 'República Dominicana', zona_horaria: 'America/Santo_Domingo', ips_oficina: [] }],
     areas: [{ id: 1, nombre: 'Dirección / Gerencia' }, { id: 2, nombre: 'Comercial / KAM' }, { id: 3, nombre: 'Operaciones / Reservas' }, { id: 4, nombre: 'Administración / Finanzas' }],
     turnos: [], herramientas: [
       { id: 1, nombre: 'OMNIAXIS', descripcion: 'Operaciones en AppSheet.', icono: 'compass', pie: 'Operaciones', url: 'https://example.com', orden: 1, activo: true },
       { id: 2, nombre: 'KAM 360', descripcion: 'Equipo comercial.', icono: 'target', pie: 'Comercial', url: 'https://example.com', orden: 2, activo: true }],
-    configuracion: [{ clave: 'tolerancias', valor: { entrada_min: 5, almuerzo_min: 5 } }, { clave: 'validar_ip', valor: { activo: false } }, { clave: 'modulo_solicitudes', valor: { activo: false } }],
+    configuracion: [{ clave: 'tolerancias', valor: { entrada_min: 5, almuerzo_min: 5 } }, { clave: 'validar_ip', valor: { activo: false } }, { clave: 'validar_equipo', valor: { activo: false } }, { clave: 'modulo_solicitudes', valor: { activo: false } }],
     perfiles: [{ id: ADMIN, nombre: 'Georgina Ávila', correo: 'georgina.avila@wakanda.travel', sede_id: 1, area_id: 1, rol: 'gerente', es_admin: true, activo: true, acepto_datos: null }],
-    malla: [], horario_base: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: [], proyectos: [], tareas: [], tarea_items: [], tarea_comentarios: [], tarea_lecturas: []
+    malla: [], horario_base: [], marcas: [], comunicados: [], comunicado_imagenes: [], comunicado_lecturas: [], solicitudes: [], solicitud_adjuntos: [], revisores: [], proyectos: [], tareas: [], tarea_items: [], tarea_comentarios: [], tarea_lecturas: [], equipos_autorizados: [], marcas_bloqueadas: []
   };
   let tid = 1;
   for (const s of [1, 2]) for (const [c, n, e, a, r, sa] of [['M', 'Mañana', '08:00:00', '12:30:00', '13:30:00', '17:30:00'], ['T', 'Tarde', '10:00:00', '14:00:00', '15:00:00', '19:00:00'], ['S', 'Sábado', '09:00:00', null, null, '13:00:00'], ['D', 'Descanso', null, null, null, null]])
@@ -95,6 +95,18 @@
     DB.__me = out; return new Q('__me');
   };
   const rpcAsync = async (fn, args) => {
+      // Seguridad de la marcación (la IP simulada se cambia con window.__ip).
+      const miIp = () => window.__ip || '152.202.102.248', cfg = k => (DB.configuracion.find(c => c.clave === k) || {}).valor || {};
+      const huella = l => l ? 'h:' + l : null, yoS = () => DB.perfiles.find(x => x.id === actual), sedeS = () => DB.sedes.find(x => x.id === yoS().sede_id);
+      const motivo = l => cfg('validar_ip').activo && !sedeS().ips_oficina.includes(miIp()) ? 'Solo puedes marcar desde la red de la oficina.'
+        : cfg('validar_equipo').activo && !DB.equipos_autorizados.some(e => e.llave_hash === huella(l)) ? 'Este equipo no está autorizado para marcar. Marca desde un computador de la oficina.' : null;
+      if (fn === 'mi_conexion') { const e = DB.equipos_autorizados.find(x => x.llave_hash === huella(args.p_llave)); return { data: { ip: miIp(), red_oficina: sedeS().ips_oficina.includes(miIp()), equipo: e ? e.nombre : null, validar_ip: !!cfg('validar_ip').activo, validar_equipo: !!cfg('validar_equipo').activo }, error: null }; }
+      if (fn === 'oficina_registrar_ip') { const s2 = DB.sedes.find(x => x.id === args.p_sede), ip = args.p_ip || miIp(); if (!s2.ips_oficina.includes(ip)) s2.ips_oficina.push(ip); return { data: s2.ips_oficina, error: null }; }
+      if (fn === 'oficina_quitar_ip') { const s2 = DB.sedes.find(x => x.id === args.p_sede); s2.ips_oficina = s2.ips_oficina.filter(x => x !== args.p_ip); return { data: s2.ips_oficina, error: null }; }
+      if (fn === 'autorizar_equipo') { const h = huella(args.p_llave); let e = DB.equipos_autorizados.find(x => x.llave_hash === h); if (!e) { e = { id: DB.equipos_autorizados.length + 1, llave_hash: h, creado: new Date().toISOString(), creado_por: actual }; DB.equipos_autorizados.push(e); } e.nombre = args.p_nombre; return { data: e, error: null }; }
+      if (fn === 'ips_recientes') { const out = {}; for (const m of DB.marcas) { const ip = m.ip || '152.202.103.93'; const o = out[ip] = out[ip] || { ip, marcas: 0, per: new Set(), ultima: m.fecha, sede_id: 1 }; o.marcas++; o.per.add(m.persona_id); if (m.fecha > o.ultima) o.ultima = m.fecha; } return { data: Object.values(out).map(o => ({ ...o, personas: o.per.size })), error: null }; }
+      if (fn === 'registrar_bloqueo') { const m = motivo(args.p_llave); if (m) DB.marcas_bloqueadas.push({ id: DB.marcas_bloqueadas.length + 1, persona_id: actual, cuando: new Date().toISOString(), tipo: args.p_tipo, ip: miIp(), motivo: m }); return { data: null, error: null }; }
+      if (fn === 'marcar') { const m = motivo(args.p_llave); if (m) return { error: { message: 'ERROR: ' + m } }; }
       if (fn === 'comentarios_sin_leer') {
         const out = {};
         for (const c of DB.tarea_comentarios) { const t = DB.tareas.find(x => x.id === c.tarea_id); if (!t || c.autor_id === actual || (t.responsable_id !== actual && t.creado_por !== actual)) continue;
