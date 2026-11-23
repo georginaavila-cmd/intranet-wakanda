@@ -1421,16 +1421,17 @@ function motivoLocal() {
   return null;
 }
 async function cargarOficina() {
-  const [con, sedes, ips, equipos, bloqueos, conf] = await Promise.all([
+  const [con, sedes, ips, equipos, bloqueos, conf, cambios] = await Promise.all([
     q(sb.rpc('mi_conexion', { p_llave: llaveEquipo() })),
     q(sb.from('sedes').select('id,nombre,ips_oficina').order('id')),
     q(sb.rpc('ips_recientes', { p_dias: 30 })),
     q(sb.from('equipos_autorizados').select('*').order('nombre')),
     q(sb.from('marcas_bloqueadas').select('*').order('cuando', { ascending: false }).limit(40)),
-    q(sb.from('configuracion').select('clave,valor'))
+    q(sb.from('configuracion').select('clave,valor')),
+    q(sb.from('ips_cambios').select('*').order('cuando', { ascending: false }).limit(15)).catch(() => [])
   ]);
   S.config = Object.fromEntries(conf.map(c => [c.clave, c.valor]));
-  S.ofi = { ...(S.ofi || {}), con, sedes, ips, equipos, bloqueos };
+  S.ofi = { ...(S.ofi || {}), con, sedes, ips, equipos, bloqueos, cambios };
   if (!S.ofi.sede) S.ofi.sede = P().sede_id;
 }
 const ipsDe = sid => ((S.ofi.sedes.find(x => x.id === sid) || {}).ips_oficina || []).map(String);
@@ -1453,6 +1454,8 @@ function oficinaView() {
   const sospechosa = Object.entries(porIp).filter(([, set]) => set.size >= 3).map(([ip]) => ip)[0];
   return `<div class="hello"><div><div class="eyebrow">Seguridad de la marcación</div><h1>Oficina</h1>
       <p>Decide desde dónde se puede marcar la jornada. Lo más seguro es activar los dos controles: el 1 evita que marquen desde la casa o con datos del celular, y el 2 evita que marquen con el celular aunque esté conectado al Wi-Fi de la oficina.</p></div></div>
+    ${(() => { const c = O.cambios.find(x => x.accion === 'agregada' && (x.detalle || '').startsWith('Automática') && Date.now() - Date.parse(x.cuando) < 7 * 864e5);
+      return c ? `<div class="alerta nueva" role="status"><span class="sq">${ico('wifi')}</span><div><b>La IP de la oficina cambió y se actualizó sola</b><span>El ${esc(cuando(c.cuando))} se registró <b>${esc(String(c.ip).replace('/32', ''))}</b> para la sede ${esc(sede(c.sede_id).nombre)}. Se detectó porque los computadores ${esc((c.detalle || '').replace('Automática: se conectaron desde ella ', ''))} se conectaron desde ella. No tienes que hacer nada.</span></div></div>` : ''; })()}
     ${sospechosa ? `<div class="alerta roja" role="alert"><span class="sq">${ico('wifi')}</span><div><b>¿Cambió la IP de la oficina?</b><span>${porIp[sospechosa].size} personas intentaron marcar desde <b>${esc(sospechosa)}</b> y fueron bloqueadas. Si esa es la nueva IP de la oficina, regístrala.</span></div>
       <button type="button" class="btn sm danger" data-ofiregip="${esc(sospechosa)}|${sedeSel}">Registrar ${esc(sospechosa)}</button></div>` : ''}
 
@@ -1466,9 +1469,13 @@ function oficinaView() {
       <form id="fOfiIp" class="fila-form" novalidate style="margin-top:8px">${varias ? `<select name="sede" aria-label="Sede">${sedeOpts(sedeSel)}</select>` : ''}<input name="ip" placeholder="Agregar otra IP a mano (ej.: 152.202.102.248)" aria-label="IP"><button class="btn ghost sm" type="submit">Agregar</button></form>
       ${recientes.length ? `<h3 class="ofi-h">Otras IP desde las que se marcó (últimos 30 días)</h3>
         <div class="tablewrap"><table><thead><tr><th>IP</th><th class="n">Marcas</th><th class="n">Personas</th><th>Última</th><th></th></tr></thead><tbody>
-        ${recientes.slice(0, 12).map(r => `<tr><td><code>${esc(r.ip)}</code>${r.personas >= 3 ? ' <span class="chip info">probablemente la oficina</span>' : ' <span class="chip mute">casa o celular</span>'}</td><td class="n">${r.marcas}</td><td class="n">${r.personas}</td><td>${esc(fechaCortaPj(r.ultima))}</td>
-          <td><button type="button" class="link" data-ofiregip="${esc(r.ip)}|${r.sede_id || sedeSel}">Registrar como oficina</button></td></tr>`).join('')}</tbody></table></div>` : ''}
-      <div class="notice">${ico('alert')}<div>Si el proveedor de internet cambia la IP de la oficina, nadie podrá marcar hasta que registres la nueva aquí (la intranet te avisará arriba si ve varios intentos bloqueados desde una IP nueva). En los últimos días la IP de la oficina ya cambió una vez: pide al proveedor una <b>IP fija</b>. Ojo: un celular conectado al Wi-Fi de la oficina sale con la misma IP; para evitarlo, activa también el control 2.</div></div>
+        ${recientes.slice(0, 12).map(r => { const vieja = O.cambios.some(c => c.accion === 'quitada' && String(c.ip).replace('/32', '') === r.ip);
+          return `<tr><td><code>${esc(r.ip)}</code>${vieja ? ' <span class="chip mute">IP anterior de la oficina</span>' : r.personas >= 3 ? ' <span class="chip info">probablemente la oficina</span>' : ' <span class="chip mute">casa o celular</span>'}</td><td class="n">${r.marcas}</td><td class="n">${r.personas}</td><td>${esc(fechaCortaPj(r.ultima))}</td>
+          <td>${vieja ? '<span class="hint">Ya no se usa</span>' : `<button type="button" class="link" data-ofiregip="${esc(r.ip)}|${r.sede_id || sedeSel}">Registrar como oficina</button>`}</td></tr>`; }).join('')}</tbody></table></div>` : ''}
+      <div class="ofi-auto"><div><b>Actualizar la IP sola</b><p class="hint">Si el proveedor cambia la IP, la intranet registra la nueva cuando dos computadores autorizados se conectan desde ella, y quita la vieja si lleva 3 días sin usarse. Un celular nunca puede cambiarla.${!eqOn ? ' <b style="color:var(--warn)">Funciona solo con el control 2 encendido.</b>' : ''}</p></div>${sw('ip_automatica', controlActivo('ip_automatica'))}</div>
+      <div class="notice">${ico('alert')}<div>${controlActivo('ip_automatica') && eqOn ? 'Si el proveedor de internet cambia la IP de la oficina, la intranet la actualiza sola (arriba lo verás en el historial).' : 'Si el proveedor de internet cambia la IP de la oficina, nadie podrá marcar hasta que registres la nueva aquí (la intranet te avisará arriba si ve varios intentos bloqueados desde una IP nueva).'} Lo ideal es pedir al proveedor una <b>IP fija</b>. Ojo: un celular conectado al Wi-Fi de la oficina sale con la misma IP; para evitarlo, activa también el control 2.</div></div>
+      ${O.cambios.length ? `<h3 class="ofi-h">Historial de cambios de IP</h3><div class="tablewrap"><table><thead><tr><th>Cuándo</th><th>Sede</th><th>Cambio</th><th>IP</th><th>Detalle</th></tr></thead><tbody>
+        ${O.cambios.map(c => `<tr><td>${esc(cuando(c.cuando))}</td><td>${esc(sede(c.sede_id).nombre)}</td><td><span class="chip ${c.accion === 'agregada' ? 'ok' : 'mute'}">${c.accion === 'agregada' ? 'Agregada' : 'Quitada'}</span></td><td><code>${esc(String(c.ip).replace('/32', ''))}</code></td><td class="hint">${esc(c.detalle || '')}</td></tr>`).join('')}</tbody></table></div>` : ''}
     </section>
 
     <section class="card ofi-control"><div class="ofi-cab"><div><div class="eyebrow" style="color:var(--ink-3)">Control 2</div><h2>Solo desde computadores autorizados</h2>

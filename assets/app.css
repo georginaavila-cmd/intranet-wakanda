@@ -189,3 +189,5 @@ table.malla select.shift { min-width: 92px; max-width: 220px; text-align-last: l
 .ofi-fila code { font-size: 15px; }
 .ofi-fila.vacia { color: var(--ink-3); font-size: 14px; }
 .ofi-control input.tname { max-width: 240px; }
+.ofi-auto { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: #fff; }
+.ofi-auto > div { flex: 1; min-width: 240px; } .ofi-auto b { color: var(--navy); } .ofi-auto p { margin: 2px 0 0; }
