@@ -622,7 +622,8 @@ function asistenciaView() {
         <button class="btn ghost sm" type="button" data-asisdia="1" aria-label="Día siguiente">Siguiente ›</button>
         ${esHoy ? '' : '<button class="btn ghost sm" type="button" data-asisdia="0">Hoy</button>'}
         <button class="btn ghost sm" type="button" data-accion="recargarAsistencia">Actualizar</button>
-        <button class="btn ghost sm" type="button" data-accion="exportarAsistencia">${ico('file')} Exportar a Excel</button></div></div>
+        <button class="btn ghost sm" type="button" data-accion="exportarAsistencia">${ico('file')} Exportar a Excel</button>
+        ${esGerencia() ? `<button class="btn ghost sm" type="button" data-view="oficina">${ico('shield')} Seguridad de la marcación</button>` : ''}</div></div>
     ${S.asisExp ? exportarAsistenciaView() : ''}
     <div class="kpis">${kpi('ok', cnt('ok'), 'Al día', 'check')}${kpi('warn', cnt('warn'), 'Con novedad', 'alert')}${kpi('bad', cnt('bad'), 'Sin marcar entrada', 'x')}${kpi('mute', cnt('mute') + cnt('info'), 'Descanso o por llegar', 'moon')}</div>
     <div class="card tablewrap"><table><thead><tr><th>Persona</th><th>Turno</th><th>Entrada</th><th>Sale a almorzar</th><th>Regresa</th><th>Salida</th><th>Estado</th></tr></thead><tbody>
